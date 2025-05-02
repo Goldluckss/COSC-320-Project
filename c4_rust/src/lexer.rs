@@ -5,31 +5,42 @@ use std::collections::HashMap;
 /// Represents the current token with its metadata
 #[derive(Debug, Clone)]
 pub struct Token {
+    /// Type of the token
     pub token_type: TokenType,
+    /// Value for numeric tokens
     pub value: Option<i64>,
+    /// Name for identifier or string tokens
     pub name: Option<String>,
 }
 
 /// The lexer state for tokenizing source code
 pub struct Lexer {
-    // Source code and position tracking
+    /// Source code
     source: String,
+    /// Current position in source
     position: usize,
+    /// Line start position (for error reporting)
     line_position: usize,
+    /// Current line number
     line: usize,
     
-    // Current token information
+    /// Current token information
     current: Token,
     
-    // Keyword mapping
+    /// Keyword mapping
     keywords: HashMap<String, TokenType>,
     
-    // Settings
+    /// Flag to print source lines during processing
     print_source: bool,
 }
 
 impl Lexer {
     /// Create a new lexer from source code string
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - The source code to tokenize
+    /// * `print_source` - Whether to print source lines during processing
     pub fn new(source: String, print_source: bool) -> Self {
         let mut lexer = Lexer {
             source,
@@ -53,7 +64,7 @@ impl Lexer {
     
     /// Initialize the keyword mapping
     fn init_keywords(&mut self) {
-        // C keywords
+        // C keywords recognized by the C4 compiler
         self.keywords.insert("char".to_string(), TokenType::Char);
         self.keywords.insert("else".to_string(), TokenType::Else);
         self.keywords.insert("enum".to_string(), TokenType::Enum);
@@ -381,6 +392,18 @@ impl Lexer {
                     name: None,
                 }
             },
+            // Preprocessor directive or comment
+            '#' => {
+                self.advance();
+                // Skip until end of line
+                while let Some(ch) = self.current_char() {
+                    if ch == '\n' {
+                        break;
+                    }
+                    self.advance();
+                }
+                return self.next_token(); // Get next token after directive
+            },
             // Unrecognized character
             _ => {
                 return Err(CompilerError::LexerError(
@@ -701,5 +724,132 @@ mod tests {
         let token = lexer.next_token().unwrap();
         assert_eq!(token.token_type, TokenType::Id);
         assert_eq!(token.name.unwrap(), "var123");
+    }
+    
+    #[test]
+    fn test_numbers() {
+        let source = "123 0x1F 077".to_string();
+        let mut lexer = Lexer::new(source, false);
+        
+        // Decimal number
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Num);
+        assert_eq!(token.value.unwrap(), 123);
+        
+        // Hexadecimal number
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Num);
+        assert_eq!(token.value.unwrap(), 31); // 0x1F = 31 in decimal
+        
+        // Octal number
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Num);
+        assert_eq!(token.value.unwrap(), 63); // 077 = 63 in decimal
+    }
+    
+    #[test]
+    fn test_string_and_char_literals() {
+        let source = r#"'a' "hello" '\n'"#.to_string();
+        let mut lexer = Lexer::new(source, false);
+        
+        // Character literal
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Num);
+        assert_eq!(token.value.unwrap(), 'a' as i64);
+        
+        // String literal
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Str);
+        assert_eq!(token.name.unwrap(), "hello");
+        
+        // Escape character
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Num);
+        assert_eq!(token.value.unwrap(), '\n' as i64);
+    }
+    
+    #[test]
+    fn test_operators() {
+        let source = "+ - * / % == != < > <= >= << >> & | ^ && || = ? ++".to_string();
+        let mut lexer = Lexer::new(source, false);
+        
+        let expected = vec![
+            TokenType::Add,
+            TokenType::Sub,
+            TokenType::Mul,
+            TokenType::Div,
+            TokenType::Mod,
+            TokenType::Eq,
+            TokenType::Ne,
+            TokenType::Lt,
+            TokenType::Gt,
+            TokenType::Le,
+            TokenType::Ge,
+            TokenType::Shl,
+            TokenType::Shr,
+            TokenType::And,
+            TokenType::Or,
+            TokenType::Xor,
+            TokenType::Lan,
+            TokenType::Lor,
+            TokenType::Assign,
+            TokenType::Cond,
+            TokenType::Inc,
+        ];
+        
+        for expected_type in expected {
+            let token = lexer.next_token().unwrap();
+            assert_eq!(token.token_type, expected_type);
+        }
+    }
+    
+    #[test]
+    fn test_comments() {
+        let source = "int a; // This is a comment\nint b;".to_string();
+        let mut lexer = Lexer::new(source, false);
+        
+        // int
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Int);
+        
+        // a
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Id);
+        assert_eq!(token.name.unwrap(), "a");
+        
+        // ;
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Semicolon);
+        
+        // The comment should be skipped, so next token should be "int"
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Int);
+        
+        // b
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Id);
+        assert_eq!(token.name.unwrap(), "b");
+    }
+    
+    #[test]
+    fn test_lexer_error() {
+        let source = "int a; @ int b;".to_string();
+        let mut lexer = Lexer::new(source, false);
+        
+        // int
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Int);
+        
+        // a
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Id);
+        
+        // ;
+        let token = lexer.next_token().unwrap();
+        assert_eq!(token.token_type, TokenType::Semicolon);
+        
+        // @ - This should cause an error
+        let result = lexer.next_token();
+        assert!(result.is_err());
     }
 }

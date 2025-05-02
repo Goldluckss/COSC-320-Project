@@ -1,17 +1,10 @@
-mod error;
-mod lexer;
-mod parser;
-mod symbol;
-mod types;
-mod vm;
-
 use std::env;
 use std::fs;
 use std::process;
 
-use crate::error::CompilerError;
-use crate::parser::Parser;
-use crate::vm::VirtualMachine;
+use c4_rust::error::CompilerError;
+use c4_rust::lexer::Lexer;
+use c4_rust::vm::VirtualMachine;
 
 fn main() -> Result<(), CompilerError> {
     let args: Vec<String> = env::args().collect();
@@ -36,7 +29,7 @@ fn main() -> Result<(), CompilerError> {
     
     // Check if filename is provided
     if filename.is_none() {
-        eprintln!("usage: c4 [-s] [-d] file ...");
+        eprintln!("usage: c4_rust [-s] [-d] file ...");
         process::exit(1);
     }
     
@@ -49,59 +42,34 @@ fn main() -> Result<(), CompilerError> {
         }
     };
     
-    // Create parser and compile
-    let mut parser = Parser::new(source, src_flag, debug_flag);
-    if let Err(e) = parser.init() {
-        eprintln!("Initialization error: {}", e);
-        process::exit(1);
-    }
+    println!("Successfully read source file: {}", filename.unwrap());
+    println!("Source length: {} characters", source.len());
     
-    // Parse the program
-    if let Err(e) = parser.parse() {
-        eprintln!("Compilation error: {}", e);
-        process::exit(1);
-    }
-    
-    // If src_flag is set, don't run the program
+    // TODO: Implement parser and code generation
+    // For now, just tokenize the source to demonstrate lexer functionality
     if src_flag {
-        println!("Compilation successful");
-        return Ok(());
-    }
-    
-    // Create and run VM
-    match parser.get_entry_point() {
-        Ok(entry_point) => {
-            let mut vm = VirtualMachine::new(
-                parser.get_code().to_vec(),
-                parser.get_data().to_vec(),
-                256 * 1024, // Stack size (same as C4)
-                debug_flag
-            );
-            
-            // Extract command line args for main
-            let program_args: Vec<String> = if i + 1 < args.len() {
-                args[i+1..].to_vec()
-            } else {
-                Vec::new()
-            };
-            
-            // Run the program
-            match vm.run(entry_point as usize, &program_args) {
-                Ok(exit_code) => {
-                    if debug_flag {
-                        println!("Program exited with code {}", exit_code);
+        println!("Tokenizing source file...");
+        let mut lexer = Lexer::new(source, true);
+        
+        loop {
+            match lexer.next_token() {
+                Ok(token) => {
+                    println!("{:?}", token);
+                    if token.token_type == c4_rust::types::TokenType::Eof {
+                        break;
                     }
-                    process::exit(exit_code as i32);
                 },
-                Err(e) => {
-                    eprintln!("Runtime error: {}", e);
+                Err(err) => {
+                    eprintln!("Lexer error: {}", err);
                     process::exit(1);
                 }
             }
-        },
-        Err(e) => {
-            eprintln!("Entry point error: {}", e);
-            process::exit(1);
         }
+        
+        println!("Tokenization complete");
     }
+    
+    println!("Note: Full compiler implementation is in progress.");
+    
+    Ok(())
 }

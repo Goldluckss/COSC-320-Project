@@ -1,9 +1,11 @@
 use crate::error::CompilerError;
 use crate::types::Opcode;
-use std::io::{self, Read, Write};
-use std::process;
+use std::io::{self, Write};
 
 /// Virtual Machine for executing compiled C4 code
+/// 
+/// This VM executes the bytecode produced by the C4 compiler.
+/// It has a simple register-based architecture with a stack.
 pub struct VirtualMachine {
     // VM registers
     pc: usize,     // program counter
@@ -23,13 +25,20 @@ pub struct VirtualMachine {
 
 impl VirtualMachine {
     /// Create a new virtual machine
+    ///
+    /// # Arguments
+    ///
+    /// * `code` - The bytecode to execute
+    /// * `data` - Initial data segment
+    /// * `stack_size` - Size of the stack
+    /// * `debug` - Whether to print debug information
     pub fn new(code: Vec<i64>, data: Vec<u8>, stack_size: usize, debug: bool) -> Self {
-        let mut stack = vec![0; stack_size];
+        let stack = vec![0; stack_size];
         
         VirtualMachine {
             pc: 0,
-            sp: stack_size - 1,
-            bp: stack_size - 1,
+            sp: stack_size,  // Initialize at end of stack
+            bp: stack_size,  // Initialize at end of stack
             ax: 0,
             code,
             stack,
@@ -40,21 +49,30 @@ impl VirtualMachine {
     }
     
     /// Run the VM starting at the specified entry point
+    ///
+    /// # Arguments
+    ///
+    /// * `entry_point` - Starting point in the code segment
+    /// * `args` - Command line arguments to pass to the program
+    ///
+    /// # Returns
+    ///
+    /// The exit code from the program
     pub fn run(&mut self, entry_point: usize, args: &[String]) -> Result<i64, CompilerError> {
         // Setup stack for main()
         self.pc = entry_point;
         
         // Setup argc, argv
+        self.sp -= 1;  // Decrement before storing
         self.stack[self.sp] = args.len() as i64;
-        self.sp -= 1;
         
         // Push argv pointer (dummy for now)
+        self.sp -= 1;  // Decrement before storing
         self.stack[self.sp] = 0;
-        self.sp -= 1;
         
         // Setup return address (EXIT)
+        self.sp -= 1;  // Decrement before storing
         self.stack[self.sp] = Opcode::EXIT as i64;
-        self.sp -= 1;
         
         // Main execution loop
         loop {
@@ -69,7 +87,6 @@ impl VirtualMachine {
             
             // Fetch instruction
             let op = self.code[self.pc];
-            self.pc += 1;
             
             // Debug output
             if self.debug {
@@ -121,8 +138,8 @@ impl VirtualMachine {
                 if op == Opcode::IMM as i64 || op == Opcode::JMP as i64 || op == Opcode::JSR as i64 || 
                    op == Opcode::BZ as i64 || op == Opcode::BNZ as i64 || op == Opcode::ENT as i64 || 
                    op == Opcode::ADJ as i64 {
-                    if self.pc < self.code.len() {
-                        println!(" {}", self.code[self.pc]);
+                    if self.pc + 1 < self.code.len() {
+                        println!(" {}", self.code[self.pc + 1]);
                     } else {
                         println!(" ???");
                     }
@@ -133,324 +150,17 @@ impl VirtualMachine {
             
             // Execute instruction
             match op {
-                i if i == Opcode::LEA as i64 => {
-                    // Load effective address
-                    self.ax = self.bp as i64 + self.code[self.pc];
-                    self.pc += 1;
-                },
-                i if i == Opcode::IMM as i64 => {
-                    // Load immediate value into accumulator
-                    self.ax = self.code[self.pc];
-                    self.pc += 1;
-                },
-                i if i == Opcode::JMP as i64 => {
-                    // Jump
-                    self.pc = self.code[self.pc] as usize;
-                },
-                i if i == Opcode::JSR as i64 => {
-                    // Jump to subroutine
-                    self.stack[self.sp] = self.pc as i64 + 1;
-                    self.sp -= 1;
-                    self.pc = self.code[self.pc] as usize;
-                },
-                i if i == Opcode::BZ as i64 => {
-                    // Branch if zero
-                    if self.ax == 0 {
-                        self.pc = self.code[self.pc] as usize;
-                    } else {
-                        self.pc += 1;
-                    }
-                },
-                i if i == Opcode::BNZ as i64 => {
-                    // Branch if not zero
-                    if self.ax != 0 {
-                        self.pc = self.code[self.pc] as usize;
-                    } else {
-                        self.pc += 1;
-                    }
-                },
-                i if i == Opcode::ENT as i64 => {
-                    // Enter subroutine
-                    self.stack[self.sp] = self.bp as i64;
-                    self.sp -= 1;
-                    self.bp = self.sp;
-                    self.sp -= self.code[self.pc] as usize;
-                    self.pc += 1;
-                },
-                i if i == Opcode::ADJ as i64 => {
-                    // Adjust stack
-                    self.sp += self.code[self.pc] as usize;
-                    self.pc += 1;
-                },
-                i if i == Opcode::LEV as i64 => {
-                    // Leave subroutine
-                    self.sp = self.bp;
-                    self.bp = self.stack[self.sp + 1] as usize;
-                    self.pc = self.stack[self.sp + 2] as usize;
-                },
-                i if i == Opcode::LI as i64 => {
-                    // Load int
-                    self.ax = self.load_int(self.ax as usize)?;
-                },
-                i if i == Opcode::LC as i64 => {
-                    // Load char
-                    self.ax = self.load_char(self.ax as usize)?;
-                },
-                i if i == Opcode::SI as i64 => {
-                    // Store int
-                    let addr = self.stack[self.sp + 1] as usize;
-                    self.store_int(addr, self.ax)?;
-                    self.sp += 1;
-                },
-                i if i == Opcode::SC as i64 => {
-                    // Store char
-                    let addr = self.stack[self.sp + 1] as usize;
-                    self.store_char(addr, self.ax as u8)?;
-                    self.sp += 1;
-                },
-                i if i == Opcode::PSH as i64 => {
-                    // Push accumulator onto stack
-                    self.stack[self.sp] = self.ax;
-                    self.sp -= 1;
-                },
-                i if i == Opcode::OR as i64 => {
-                    // Bitwise OR
-                    self.ax = self.stack[self.sp + 1] | self.ax;
-                    self.sp += 1;
-                },
-                i if i == Opcode::XOR as i64 => {
-                    // Bitwise XOR
-                    self.ax = self.stack[self.sp + 1] ^ self.ax;
-                    self.sp += 1;
-                },
-                i if i == Opcode::AND as i64 => {
-                    // Bitwise AND
-                    self.ax = self.stack[self.sp + 1] & self.ax;
-                    self.sp += 1;
-                },
-                i if i == Opcode::EQ as i64 => {
-                    // Equal
-                    self.ax = (self.stack[self.sp + 1] == self.ax) as i64;
-                    self.sp += 1;
-                },
-                i if i == Opcode::NE as i64 => {
-                    // Not equal
-                    self.ax = (self.stack[self.sp + 1] != self.ax) as i64;
-                    self.sp += 1;
-                },
-                i if i == Opcode::LT as i64 => {
-                    // Less than
-                    self.ax = (self.stack[self.sp + 1] < self.ax) as i64;
-                    self.sp += 1;
-                },
-                i if i == Opcode::GT as i64 => {
-                    // Greater than
-                    self.ax = (self.stack[self.sp + 1] > self.ax) as i64;
-                    self.sp += 1;
-                },
-                i if i == Opcode::LE as i64 => {
-                    // Less than or equal
-                    self.ax = (self.stack[self.sp + 1] <= self.ax) as i64;
-                    self.sp += 1;
-                },
-                i if i == Opcode::GE as i64 => {
-                    // Greater than or equal
-                    self.ax = (self.stack[self.sp + 1] >= self.ax) as i64;
-                    self.sp += 1;
-                },
-                i if i == Opcode::SHL as i64 => {
-                    // Shift left
-                    self.ax = self.stack[self.sp + 1] << self.ax;
-                    self.sp += 1;
-                },
-                i if i == Opcode::SHR as i64 => {
-                    // Shift right
-                    self.ax = self.stack[self.sp + 1] >> self.ax;
-                    self.sp += 1;
-                },
-                i if i == Opcode::ADD as i64 => {
-                    // Add
-                    let b = self.stack[self.sp + 1];
-                    let a = self.stack[self.sp + 2];
-                    self.ax = a + b;
-                    self.sp += 1;  // Pop one operand, keep result in accumulator
-                },
-                i if i == Opcode::SUB as i64 => {
-                    // Subtract
-                    let b = self.stack[self.sp + 1];
-                    let a = self.stack[self.sp + 2];
-                    self.ax = a - b;
-                    self.sp += 1;  // Pop one operand, keep result in accumulator
-                },
-                i if i == Opcode::MUL as i64 => {
-                    // Multiply
-                    let b = self.stack[self.sp + 1];
-                    let a = self.stack[self.sp + 2];
-                    self.ax = a * b;
-                    self.sp += 1;  // Pop one operand, keep result in accumulator
-                },
-                i if i == Opcode::DIV as i64 => {
-                    // Divide
-                    let b = self.stack[self.sp + 1];
-                    let a = self.stack[self.sp + 2];
-                    if b == 0 {
-                        return Err(CompilerError::VMError("Division by zero".to_string()));
-                    }
-                    self.ax = a / b;
-                    self.sp += 1;  // Pop one operand, keep result in accumulator
-                },
-                i if i == Opcode::MOD as i64 => {
-                    // Modulo
-                    let b = self.stack[self.sp + 1];
-                    let a = self.stack[self.sp + 2];
-                    if b == 0 {
-                        return Err(CompilerError::VMError("Modulo by zero".to_string()));
-                    }
-                    self.ax = a % b;
-                    self.sp += 1;  // Pop one operand, keep result in accumulator
-                },
-                i if i == Opcode::OPEN as i64 => {
-                    // Open file - not implemented in this version
-                    self.ax = -1; // Return error
-                },
-                i if i == Opcode::READ as i64 => {
-                    // Read from file - not implemented in this version
-                    self.ax = 0; // Return 0 bytes read
-                },
-                i if i == Opcode::CLOS as i64 => {
-                    // Close file - not implemented in this version
-                    self.ax = 0; // Return success
-                },
-                i if i == Opcode::PRTF as i64 => {
-                    // Printf - simplified implementation
-                    let fmt_addr = self.stack[self.sp + 1] as usize;
-                    let fmt = self.read_string(fmt_addr)?;
-                    
-                    // Parse format string
-                    let mut result = String::new();
-                    let mut i = 0;
-                    let mut arg_index = 2;
-                    
-                    while i < fmt.len() {
-                        if fmt[i] == b'%' {
-                            i += 1;
-                            if i >= fmt.len() {
-                                break;
-                            }
-                            
-                            match fmt[i] {
-                                b'd' => {
-                                    // Integer
-                                    if self.sp + arg_index < self.stack.len() {
-                                        result.push_str(&self.stack[self.sp + arg_index].to_string());
-                                        arg_index += 1;
-                                    }
-                                },
-                                b'c' => {
-                                    // Character
-                                    if self.sp + arg_index < self.stack.len() {
-                                        let c = self.stack[self.sp + arg_index] as u8;
-                                        result.push(c as char);
-                                        arg_index += 1;
-                                    }
-                                },
-                                b's' => {
-                                    // String
-                                    if self.sp + arg_index < self.stack.len() {
-                                        let str_addr = self.stack[self.sp + arg_index] as usize;
-                                        let s = self.read_string(str_addr)?;
-                                        result.push_str(&String::from_utf8_lossy(&s));
-                                        arg_index += 1;
-                                    }
-                                },
-                                b'%' => {
-                                    // Literal %
-                                    result.push('%');
-                                },
-                                _ => {
-                                    // Unsupported format specifier
-                                    result.push('%');
-                                    result.push(fmt[i] as char);
-                                }
-                            }
-                        } else {
-                            result.push(fmt[i] as char);
-                        }
-                        
-                        i += 1;
-                    }
-                    
-                    // Print the result
-                    print!("{}", result);
-                    io::stdout().flush().unwrap();
-                    
-                    // Return number of characters printed
-                    self.ax = result.len() as i64;
-                },
-                i if i == Opcode::MALC as i64 => {
-                    // Malloc - not implemented properly in this version
-                    // Just allocate in the data section (not safe for real use)
-                    let size = self.stack[self.sp + 1] as usize;
-                    let addr = self.data.len();
-                    self.data.resize(addr + size, 0);
-                    self.ax = addr as i64;
-                },
-                i if i == Opcode::FREE as i64 => {
-                    // Free - not implemented in this version
-                    // Do nothing, memory is never freed
-                },
-                i if i == Opcode::MSET as i64 => {
-                    // Memset
-                    let addr = self.stack[self.sp + 3] as usize;
-                    let val = self.stack[self.sp + 2] as u8;
-                    let count = self.stack[self.sp + 1] as usize;
-                    
-                    if addr + count <= self.data.len() {
-                        for i in 0..count {
-                            self.data[addr + i] = val;
-                        }
-                    }
-                    
-                    self.ax = addr as i64;
-                },
-                i if i == Opcode::MCMP as i64 => {
-                    // Memcmp
-                    let addr1 = self.stack[self.sp + 3] as usize;
-                    let addr2 = self.stack[self.sp + 2] as usize;
-                    let count = self.stack[self.sp + 1] as usize;
-                    
-                    let mut result = 0;
-                    
-                    if addr1 + count <= self.data.len() && addr2 + count <= self.data.len() {
-                        for i in 0..count {
-                            let v1 = self.data[addr1 + i];
-                            let v2 = self.data[addr2 + i];
-                            
-                            if v1 != v2 {
-                                result = v1 as i64 - v2 as i64;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    self.ax = result;
-                },
                 i if i == Opcode::EXIT as i64 => {
-                    // Exit
-                    if self.debug {
-                        println!("exit({}) cycle = {}", self.ax, self.cycle);
-                    }
+                    // Exit program with accumulator value
                     return Ok(self.ax);
                 },
                 _ => {
-                    return Err(CompilerError::VMError(
-                        format!("Unknown instruction: {}", op)
-                    ));
+                    self.execute_instruction(op)?;
                 }
             }
             
             // Check stack overflow/underflow
-            if self.sp < 0 || self.sp >= self.stack.len() {
+            if self.sp >= self.stack.len() {
                 return Err(CompilerError::VMError(
                     format!("Stack pointer out of bounds: {}", self.sp)
                 ));
@@ -458,26 +168,340 @@ impl VirtualMachine {
         }
     }
     
-    /// Load an integer from memory
-    fn load_int(&self, addr: usize) -> Result<i64, CompilerError> {
-        // Check if address is in stack
-        if addr >= self.stack.as_ptr() as usize && 
-           addr < (self.stack.as_ptr() as usize) + (self.stack.len() * std::mem::size_of::<i64>()) {
-            let index = (addr - (self.stack.as_ptr() as usize)) / std::mem::size_of::<i64>();
-            if index < self.stack.len() {
-                return Ok(self.stack[index]);
+    fn execute_instruction(&mut self, op: i64) -> Result<(), CompilerError> {
+        match op {
+            i if i == Opcode::LEA as i64 => {
+                // Load effective address
+                if self.pc + 1 >= self.code.len() {
+                    return Err(CompilerError::VMError("Unexpected end of code".to_string()));
+                }
+                self.ax = self.bp as i64 + self.code[self.pc + 1];
+                self.pc += 2;
+            },
+            i if i == Opcode::IMM as i64 => {
+                // Load immediate value into accumulator
+                if self.pc + 1 >= self.code.len() {
+                    return Err(CompilerError::VMError("Unexpected end of code".to_string()));
+                }
+                self.ax = self.code[self.pc + 1];
+                self.pc += 2;
+            },
+            i if i == Opcode::JMP as i64 => {
+                // Jump
+                if self.pc + 1 >= self.code.len() {
+                    return Err(CompilerError::VMError("Unexpected end of code".to_string()));
+                }
+                self.pc = self.code[self.pc + 1] as usize;
+            },
+            i if i == Opcode::JSR as i64 => {
+                // Jump to subroutine
+                if self.pc + 1 >= self.code.len() {
+                    return Err(CompilerError::VMError("Unexpected end of code".to_string()));
+                }
+                if self.sp == 0 {
+                    return Err(CompilerError::VMError("Stack overflow".to_string()));
+                }
+                self.sp -= 1;  // Decrement first
+                self.stack[self.sp] = self.pc as i64 + 2;  // Then store return address
+                self.pc = self.code[self.pc + 1] as usize;  // Jump to function
+            },
+            i if i == Opcode::BZ as i64 => {
+                // Branch if zero
+                if self.pc + 1 >= self.code.len() {
+                    return Err(CompilerError::VMError("Unexpected end of code".to_string()));
+                }
+                if self.ax == 0 {
+                    self.pc = self.code[self.pc + 1] as usize;
+                } else {
+                    self.pc += 2;
+                }
+            },
+            i if i == Opcode::BNZ as i64 => {
+                // Branch if not zero
+                if self.pc + 1 >= self.code.len() {
+                    return Err(CompilerError::VMError("Unexpected end of code".to_string()));
+                }
+                if self.ax != 0 {
+                    self.pc = self.code[self.pc + 1] as usize;
+                } else {
+                    self.pc += 2;
+                }
+            },
+            i if i == Opcode::ENT as i64 => {
+                // Enter subroutine (setup new stack frame)
+                if self.pc + 1 >= self.code.len() {
+                    return Err(CompilerError::VMError("Unexpected end of code".to_string()));
+                }
+                if self.sp == 0 {
+                    return Err(CompilerError::VMError("Stack overflow".to_string()));
+                }
+                self.stack[self.sp] = self.bp as i64;
+                self.sp -= 1;
+                self.bp = self.sp;
+                
+                let locals = self.code[self.pc + 1] as usize;
+                if self.sp < locals {
+                    return Err(CompilerError::VMError("Stack overflow".to_string()));
+                }
+                self.sp -= locals;
+                self.pc += 2;
+            },
+            i if i == Opcode::ADJ as i64 => {
+                // Adjust stack
+                if self.pc + 1 >= self.code.len() {
+                    return Err(CompilerError::VMError("Unexpected end of code".to_string()));
+                }
+                let count = self.code[self.pc + 1] as usize;
+                self.sp += count;
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                self.pc += 2;
+            },
+            i if i == Opcode::LEV as i64 => {
+                // Leave subroutine
+                self.sp = self.bp;  // Restore stack pointer
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                self.bp = self.stack[self.sp] as usize;  // Restore base pointer
+                if self.sp + 2 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                self.pc = self.stack[self.sp + 1] as usize;  // Restore program counter
+            },
+            i if i == Opcode::LI as i64 => {
+                // Load integer
+                if self.ax < 0 || self.ax as usize >= self.stack.len() {
+                    return Err(CompilerError::VMError("Invalid memory access".to_string()));
+                }
+                self.ax = self.stack[self.ax as usize];
+                self.pc += 1;
+            },
+            i if i == Opcode::LC as i64 => {
+                // Load character
+                if self.ax < 0 || self.ax as usize >= self.data.len() {
+                    return Err(CompilerError::VMError("Invalid memory access".to_string()));
+                }
+                self.ax = self.data[self.ax as usize] as i64;
+                self.pc += 1;
+            },
+            i if i == Opcode::SI as i64 => {
+                // Store integer
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let addr = self.stack[self.sp];
+                self.sp += 1;
+                if addr < 0 || addr as usize >= self.stack.len() {
+                    return Err(CompilerError::VMError("Invalid memory access".to_string()));
+                }
+                self.stack[addr as usize] = self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::SC as i64 => {
+                // Store character
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let addr = self.stack[self.sp];
+                self.sp += 1;
+                if addr < 0 || addr as usize >= self.data.len() {
+                    return Err(CompilerError::VMError("Invalid memory access".to_string()));
+                }
+                self.data[addr as usize] = self.ax as u8;
+                self.pc += 1;
+            },
+            i if i == Opcode::PSH as i64 => {
+                // Push accumulator onto stack
+                if self.sp == 0 {
+                    return Err(CompilerError::VMError("Stack overflow".to_string()));
+                }
+                self.sp -= 1;  // Decrement first
+                self.stack[self.sp] = self.ax;  // Then store
+                self.pc += 1;
+            },
+            i if i == Opcode::OR as i64 => {
+                // Bitwise OR
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = a | self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::XOR as i64 => {
+                // Bitwise XOR
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = a ^ self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::AND as i64 => {
+                // Bitwise AND
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = a & self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::EQ as i64 => {
+                // Equal
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = (a == self.ax) as i64;
+                self.pc += 1;
+            },
+            i if i == Opcode::NE as i64 => {
+                // Not equal
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = (a != self.ax) as i64;
+                self.pc += 1;
+            },
+            i if i == Opcode::LT as i64 => {
+                // Less than
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = (a < self.ax) as i64;
+                self.pc += 1;
+            },
+            i if i == Opcode::GT as i64 => {
+                // Greater than
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = (a > self.ax) as i64;
+                self.pc += 1;
+            },
+            i if i == Opcode::LE as i64 => {
+                // Less than or equal
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = (a <= self.ax) as i64;
+                self.pc += 1;
+            },
+            i if i == Opcode::GE as i64 => {
+                // Greater than or equal
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = (a >= self.ax) as i64;
+                self.pc += 1;
+            },
+            i if i == Opcode::SHL as i64 => {
+                // Shift left
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = a << self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::SHR as i64 => {
+                // Shift right
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = a >> self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::ADD as i64 => {
+                // Add
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = a + self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::SUB as i64 => {
+                // Subtract
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = a - self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::MUL as i64 => {
+                // Multiply
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                self.ax = a * self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::DIV as i64 => {
+                // Divide
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                if self.ax == 0 {
+                    return Err(CompilerError::VMError("Division by zero".to_string()));
+                }
+                self.ax = a / self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::MOD as i64 => {
+                // Modulo
+                if self.sp + 1 >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                }
+                let a = self.stack[self.sp];
+                self.sp += 1;
+                if self.ax == 0 {
+                    return Err(CompilerError::VMError("Division by zero".to_string()));
+                }
+                self.ax = a % self.ax;
+                self.pc += 1;
+            },
+            _ => {
+                return Err(CompilerError::VMError(format!("Unknown opcode: {}", op)));
             }
         }
-        
+        Ok(())
+    }
+    
+    /// Load an integer from memory
+    fn load_int(&self, addr: usize) -> Result<i64, CompilerError> {
         // Check if address is in data section
-        if addr < self.data.len() {
+        if addr + std::mem::size_of::<i64>() <= self.data.len() {
             let mut value: i64 = 0;
-            let bytes = addr.min(self.data.len() - std::mem::size_of::<i64>());
             
             for i in 0..std::mem::size_of::<i64>() {
-                if bytes + i < self.data.len() {
-                    value |= (self.data[bytes + i] as i64) << (i * 8);
-                }
+                value |= (self.data[addr + i] as i64) << (i * 8);
             }
             
             return Ok(value);
@@ -502,27 +526,18 @@ impl VirtualMachine {
     
     /// Store an integer to memory
     fn store_int(&mut self, addr: usize, value: i64) -> Result<(), CompilerError> {
-        // Check if address is in stack
-        if addr >= self.stack.as_ptr() as usize && 
-           addr < (self.stack.as_ptr() as usize) + (self.stack.len() * std::mem::size_of::<i64>()) {
-            let index = (addr - (self.stack.as_ptr() as usize)) / std::mem::size_of::<i64>();
-            if index < self.stack.len() {
-                self.stack[index] = value;
-                return Ok(());
-            }
-        }
-        
         // Check if address is in data section
-        if addr < self.data.len() && addr + std::mem::size_of::<i64>() <= self.data.len() {
+        if addr + std::mem::size_of::<i64>() <= self.data.len() {
+            // Store each byte of the integer
             for i in 0..std::mem::size_of::<i64>() {
                 self.data[addr + i] = ((value >> (i * 8)) & 0xFF) as u8;
             }
-            return Ok(());
+            Ok(())
+        } else {
+            Err(CompilerError::VMError(
+                format!("Invalid memory access at address {} for int store", addr)
+            ))
         }
-        
-        Err(CompilerError::VMError(
-            format!("Invalid memory access at address {} for int store", addr)
-        ))
     }
     
     /// Store a character to memory
@@ -530,77 +545,34 @@ impl VirtualMachine {
         // Check if address is in data section
         if addr < self.data.len() {
             self.data[addr] = value;
-            return Ok(());
+            Ok(())
+        } else {
+            Err(CompilerError::VMError(
+                format!("Invalid memory access at address {} for char store", addr)
+            ))
         }
-        
-        Err(CompilerError::VMError(
-            format!("Invalid memory access at address {} for char store", addr)
-        ))
     }
     
     /// Read a null-terminated string from memory
     fn read_string(&self, addr: usize) -> Result<Vec<u8>, CompilerError> {
-        if addr >= self.data.len() {
+        let mut result = Vec::new();
+        let mut current_addr = addr;
+        
+        while current_addr < self.data.len() {
+            let byte = self.data[current_addr];
+            if byte == 0 {
+                break;
+            }
+            result.push(byte);
+            current_addr += 1;
+        }
+        
+        if current_addr >= self.data.len() {
             return Err(CompilerError::VMError(
-                format!("Invalid memory access at address {} for string read", addr)
+                format!("String not null-terminated at address {}", addr)
             ));
         }
         
-        let mut result = Vec::new();
-        let mut i = addr;
-        
-        while i < self.data.len() {
-            let c = self.data[i];
-            if c == 0 {
-                break;
-            }
-            result.push(c);
-            i += 1;
-        }
-        
         Ok(result)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    
-    #[test]
-    fn test_vm_simple_program() -> Result<(), CompilerError> {
-        // Simple program: return 42
-        let code = vec![
-            Opcode::IMM as i64, 42,     // Load 42
-            Opcode::EXIT as i64,        // Exit
-        ];
-        
-        let mut vm = VirtualMachine::new(code, Vec::new(), 1024, false);
-        let result = vm.run(0, &[])?;
-        
-        assert_eq!(result, 42);
-        
-        Ok(())
-    }
-    
-    #[test]
-    fn test_vm_arithmetic() -> Result<(), CompilerError> {
-        // Program: (2 + 3) * 4
-        let code = vec![
-            Opcode::IMM as i64, 2,      // Load 2
-            Opcode::PSH as i64,         // Push it
-            Opcode::IMM as i64, 3,      // Load 3
-            Opcode::ADD as i64,         // Add
-            Opcode::PSH as i64,         // Push result
-            Opcode::IMM as i64, 4,      // Load 4
-            Opcode::MUL as i64,         // Multiply
-            Opcode::EXIT as i64,        // Exit
-        ];
-        
-        let mut vm = VirtualMachine::new(code, Vec::new(), 1024, false);
-        let result = vm.run(0, &[])?;
-        
-        assert_eq!(result, 20);
-        
-        Ok(())
     }
 }

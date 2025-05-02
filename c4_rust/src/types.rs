@@ -1,5 +1,5 @@
 /// Token types for the lexer and parser
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum TokenType {
     // EOF sentinel
     Eof,
@@ -33,11 +33,11 @@ pub enum TokenType {
     And,     // &
     Eq,      // ==
     Ne,      // !=
-    Lt,      // 
+    Lt,      // <
     Gt,      // >
     Le,      // <=
     Ge,      // >=
-    Shl,     // 
+    Shl,     // <<
     Shr,     // >>
     Add,     // +
     Sub,     // -
@@ -64,7 +64,9 @@ pub enum TokenType {
 }
 
 impl TokenType {
-    // Allow comparison for precedence (>= operator)
+    /// Get the precedence level of an operator token
+    /// 
+    /// Higher values mean higher precedence
     pub fn precedence(&self) -> usize {
         match self {
             TokenType::Assign => 2,
@@ -93,6 +95,8 @@ impl PartialOrd for TokenType {
 }
 
 /// VM operation codes
+/// 
+/// These are the instructions understood by the VM
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Opcode {
     LEA,    // Load effective address
@@ -141,6 +145,7 @@ pub enum Opcode {
 }
 
 impl Opcode {
+    /// Convert opcode to string representation for debugging
     pub fn to_string(&self) -> &'static str {
         match self {
             Opcode::LEA => "LEA", Opcode::IMM => "IMM", Opcode::JMP => "JMP",
@@ -161,10 +166,12 @@ impl Opcode {
 }
 
 /// Type system
-#[derive(Debug, PartialEq, Clone, Copy)]
+/// 
+/// The C4 compiler handles char, int, and pointer types
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum Type {
     CHAR = 0,   // Character type (8-bit)
-    INT = 1,    // Integer type (64-bit in the original)
+    INT = 1,    // Integer type (64-bit in this implementation)
     PTR = 2,    // Pointer type (starts at 2 and increments for each level of indirection)
 }
 
@@ -176,7 +183,7 @@ impl Type {
             Type::INT => Type::PTR,
             Type::PTR => {
                 // Create a pointer to pointer (PTR + 1)
-                // This is a bit of a hack to mimic C4's behavior
+                // This mimics C4's behavior where pointer types are represented by integers
                 let ptr_level = self as u8 + 1;
                 unsafe { std::mem::transmute::<u8, Type>(ptr_level) }
             }
@@ -197,5 +204,38 @@ impl Type {
             Type::CHAR => 1,
             _ => std::mem::size_of::<i64>(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_token_precedence() {
+        assert!(TokenType::Mul > TokenType::Add);
+        assert!(TokenType::Add > TokenType::Eq);
+        assert!(TokenType::Eq > TokenType::And);
+        assert!(TokenType::And > TokenType::Or);
+    }
+    
+    #[test]
+    fn test_type_ptr() {
+        let int_t = Type::INT;
+        let ptr_t = int_t.to_ptr();
+        
+        assert_eq!(ptr_t, Type::PTR);
+        assert!(ptr_t.is_ptr());
+        
+        let ptr_to_ptr_t = ptr_t.to_ptr();
+        assert!(ptr_to_ptr_t.is_ptr());
+        assert!(ptr_to_ptr_t as i32 > ptr_t as i32);
+    }
+    
+    #[test]
+    fn test_type_size() {
+        assert_eq!(Type::CHAR.size(), 1);
+        assert_eq!(Type::INT.size(), std::mem::size_of::<i64>());
+        assert_eq!(Type::PTR.size(), std::mem::size_of::<i64>());
     }
 }

@@ -4,7 +4,7 @@ use c4_rust::types::Opcode;
 
 // Helper function to create a parser with test source
 fn create_test_parser(source: &str) -> Parser {
-    Parser::new(source.to_string(), false, false)
+    Parser::new(source.to_string(), false)
 }
 
 #[test]

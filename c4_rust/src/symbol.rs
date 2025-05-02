@@ -4,17 +4,24 @@ use std::collections::HashMap;
 /// Symbol representation
 #[derive(Debug, Clone)]
 pub struct Symbol {
+    /// Name of the symbol
     pub name: String,
-    pub class: TokenType,   // Fun, Glo, Loc, Num, etc.
-    pub typ: Type,          // INT, CHAR, PTR
-    pub value: i64,        // Value or address
+    /// Symbol class (Fun, Glo, Loc, Num, etc.)
+    pub class: TokenType,
+    /// Symbol type (INT, CHAR, PTR)
+    pub typ: Type,
+    /// Value or address
+    pub value: i64,
 }
 
 /// Symbol table for managing variables and functions
 pub struct SymbolTable {
+    /// List of all symbols
     symbols: Vec<Symbol>,
-    scopes: Vec<usize>,     // Stack of scope start indices
-    name_map: HashMap<String, usize>, // Fast lookup by name
+    /// Stack of scope start indices
+    scopes: Vec<usize>,
+    /// Fast lookup by name (scope-prefixed)
+    name_map: HashMap<String, usize>,
 }
 
 impl SymbolTable {
@@ -28,6 +35,17 @@ impl SymbolTable {
     }
     
     /// Add a symbol to the current scope
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Symbol name
+    /// * `class` - Symbol class (Fun, Glo, Loc, etc.)
+    /// * `typ` - Symbol type (INT, CHAR, PTR)
+    /// * `value` - Symbol value or address
+    ///
+    /// # Returns
+    ///
+    /// The index of the added symbol
     pub fn add(&mut self, name: &str, class: TokenType, typ: Type, value: i64) -> usize {
         let index = self.symbols.len();
         
@@ -59,6 +77,14 @@ impl SymbolTable {
     }
     
     /// Find a symbol by name, searching from current scope up to global
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Symbol name to search for
+    ///
+    /// # Returns
+    ///
+    /// The symbol if found, None otherwise
     pub fn get(&self, name: &str) -> Option<Symbol> {
         // Start at current scope and work up
         for scope_level in (0..self.scopes.len()).rev() {
@@ -84,11 +110,27 @@ impl SymbolTable {
     }
     
     /// Check if a symbol exists in any accessible scope
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Symbol name to check
+    ///
+    /// # Returns
+    ///
+    /// True if the symbol exists in any accessible scope
     pub fn exists(&self, name: &str) -> bool {
         self.get(name).is_some()
     }
     
     /// Check if a symbol exists in the current scope
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Symbol name to check
+    ///
+    /// # Returns
+    ///
+    /// True if the symbol exists in the current scope
     pub fn exists_in_current_scope(&self, name: &str) -> bool {
         if self.scopes.is_empty() {
             return false;
@@ -135,13 +177,43 @@ impl SymbolTable {
     }
     
     /// Find the main function
+    ///
+    /// # Returns
+    ///
+    /// The main function symbol if found, None otherwise
     pub fn get_main(&self) -> Option<Symbol> {
         self.get("main")
     }
     
     /// Get all symbols
+    ///
+    /// # Returns
+    ///
+    /// A slice of all symbols
     pub fn get_symbols(&self) -> &[Symbol] {
         &self.symbols
+    }
+    
+    /// Get symbol by index
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Symbol index
+    ///
+    /// # Returns
+    ///
+    /// The symbol at the given index, or None if out of bounds
+    pub fn get_by_index(&self, index: usize) -> Option<&Symbol> {
+        self.symbols.get(index)
+    }
+    
+    /// Get the number of scopes
+    ///
+    /// # Returns
+    ///
+    /// The number of scopes
+    pub fn get_scope_count(&self) -> usize {
+        self.scopes.len()
     }
 }
 
@@ -198,5 +270,42 @@ mod tests {
         // a and b should no longer be accessible
         assert!(table.get("a").is_none());
         assert!(table.get("b").is_none());
+    }
+    
+    #[test]
+    fn test_exist_in_current_scope() {
+        let mut table = SymbolTable::new();
+        
+        // Add global symbols
+        table.add("x", TokenType::Glo, Type::INT, 0);
+        
+        assert!(table.exists_in_current_scope("x"));
+        assert!(!table.exists_in_current_scope("y"));
+        
+        // Enter a function scope
+        table.enter_scope();
+        
+        assert!(!table.exists_in_current_scope("x")); // Not in current scope
+        assert!(table.exists("x")); // But still accessible
+        
+        // Add local symbols
+        table.add("a", TokenType::Loc, Type::INT, 0);
+        
+        assert!(table.exists_in_current_scope("a"));
+    }
+    
+    #[test]
+    fn test_function_symbol() {
+        let mut table = SymbolTable::new();
+        
+        // Add a function
+        let func_addr = 100;
+        table.add("main", TokenType::Fun, Type::INT, func_addr);
+        
+        // Find main
+        let main = table.get_main().unwrap();
+        assert_eq!(main.name, "main");
+        assert_eq!(main.class, TokenType::Fun);
+        assert_eq!(main.value, func_addr);
     }
 }
