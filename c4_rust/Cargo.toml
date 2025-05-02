@@ -1,0 +1,15 @@
+[package]
+name = "c4_rust"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Team"]
+
+[lib]
+name = "c4_rust"
+path = "src/lib.rs"
+
+[dependencies]
+# No external dependencies required
+
+[dev-dependencies]
+pretty_assertions = "1.3"
