@@ -126,7 +126,7 @@ fn test_comparison_operations() -> Result<(), CompilerError> {
 #[test]
 fn test_memory_operations() -> Result<(), CompilerError> {
     // Test storing and loading integer
-    let mut data = vec![0; 100]; // Allocate data space
+    let data = vec![0; 100]; // Allocate data space
     
     let mem_code = vec![
         // Store 42 at address 0
@@ -158,7 +158,7 @@ fn test_memory_operations() -> Result<(), CompilerError> {
     assert_eq!(vm.run(0, &[])?, 126); // 42 + 84 = 126
     
     // Test char operations
-    let mut data = vec![0; 100]; // Allocate data space
+    let data = vec![0; 100]; // Allocate data space
     
     let char_code = vec![
         // Store 'A' at address 0

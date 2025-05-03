@@ -1,8 +1,9 @@
 use crate::error::CompilerError;
 use crate::lexer::{Lexer, Token};
-use crate::symbol::{Symbol, SymbolTable};
+use crate::symbol::SymbolTable;
 use crate::types::{Opcode, TokenType, Type};
 
+/// Parser for the C4 compiler
 pub struct Parser {
     lexer: Lexer,
     code: Vec<i64>,
@@ -16,6 +17,12 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// Create a new parser
+    ///
+    /// # Arguments
+    ///
+    /// * `source` - The source code to parse
+    /// * `print_source` - Whether to print source lines during processing
     pub fn new(source: String, print_source: bool) -> Self {
         Parser {
             lexer: Lexer::new(source, print_source),
@@ -34,25 +41,30 @@ impl Parser {
         }
     }
 
+    /// Initialize the parser
     pub fn init(&mut self) -> Result<(), CompilerError> {
         self.next_token()?;
         Ok(())
     }
 
+    /// Parse the entire source code
     pub fn parse(&mut self) -> Result<(), CompilerError> {
         self.parse_program()?;
         Ok(())
     }
 
+    /// Get the generated code
     pub fn get_code(&self) -> &[i64] {
         &self.code
     }
 
+    /// Get the next token from the lexer
     fn next_token(&mut self) -> Result<(), CompilerError> {
         self.current = self.lexer.next_token()?;
         Ok(())
     }
 
+    /// Match and consume the current token if it matches the expected type
     fn match_token(&mut self, expected: TokenType) -> Result<(), CompilerError> {
         if self.current.token_type == expected {
             self.next_token()?;
@@ -64,6 +76,7 @@ impl Parser {
         }
     }
 
+    /// Parse the program
     fn parse_program(&mut self) -> Result<(), CompilerError> {
         while self.current.token_type != TokenType::Eof {
             self.parse_declaration()?;
@@ -71,6 +84,7 @@ impl Parser {
         Ok(())
     }
 
+    /// Parse a declaration (variable or function)
     fn parse_declaration(&mut self) -> Result<(), CompilerError> {
         // Parse type
         match self.current.token_type {
@@ -102,6 +116,7 @@ impl Parser {
         Ok(())
     }
 
+    /// Parse a function declaration
     fn parse_function(&mut self, name: &str) -> Result<(), CompilerError> {
         self.current_class = TokenType::Fun;
         self.current_bp = self.code.len();
@@ -131,6 +146,7 @@ impl Parser {
         Ok(())
     }
 
+    /// Parse function parameters
     fn parse_parameters(&mut self) -> Result<(), CompilerError> {
         if self.current.token_type == TokenType::Int || self.current.token_type == TokenType::Char {
             let param_type = if self.current.token_type == TokenType::Int {
@@ -157,6 +173,7 @@ impl Parser {
         Ok(())
     }
 
+    /// Parse a single parameter
     fn parse_parameter(&mut self) -> Result<(), CompilerError> {
         let param_type = if self.current.token_type == TokenType::Int {
             Type::INT
@@ -179,6 +196,7 @@ impl Parser {
         Ok(())
     }
 
+    /// Parse a variable declaration
     fn parse_variable(&mut self, name: &str) -> Result<(), CompilerError> {
         let mut size = 1;
         if self.current.token_type == TokenType::Brak {
@@ -209,6 +227,7 @@ impl Parser {
         Ok(())
     }
 
+    /// Parse a statement
     fn parse_statement(&mut self) -> Result<(), CompilerError> {
         match self.current.token_type {
             TokenType::If => self.parse_if()?,
@@ -220,6 +239,7 @@ impl Parser {
         Ok(())
     }
 
+    /// Parse an if statement
     fn parse_if(&mut self) -> Result<(), CompilerError> {
         self.next_token()?;
         self.match_token(TokenType::LParen)?;
@@ -236,21 +256,22 @@ impl Parser {
             self.emit(0); // Placeholder for jump address
 
             // Update if jump
-            self.code[if_pos] = self.code.len() as i64;
+            self.code[if_pos + 1] = self.code.len() as i64;
 
             self.next_token()?;
             self.parse_statement()?;
 
             // Update else jump
-            self.code[else_pos] = self.code.len() as i64;
+            self.code[else_pos + 1] = self.code.len() as i64;
         } else {
             // Update if jump
-            self.code[if_pos] = self.code.len() as i64;
+            self.code[if_pos + 1] = self.code.len() as i64;
         }
 
         Ok(())
     }
 
+    /// Parse a while statement
     fn parse_while(&mut self) -> Result<(), CompilerError> {
         self.next_token()?;
         let while_pos = self.code.len();
@@ -268,11 +289,12 @@ impl Parser {
         self.emit(while_pos as i64);
 
         // Update exit jump
-        self.code[exit_pos] = self.code.len() as i64;
+        self.code[exit_pos + 1] = self.code.len() as i64;
 
         Ok(())
     }
 
+    /// Parse a return statement
     fn parse_return(&mut self) -> Result<(), CompilerError> {
         self.next_token()?;
         if self.current.token_type != TokenType::Semicolon {
@@ -283,6 +305,7 @@ impl Parser {
         Ok(())
     }
 
+    /// Parse a block of statements
     fn parse_block(&mut self) -> Result<(), CompilerError> {
         self.match_token(TokenType::LBrace)?;
         while self.current.token_type != TokenType::RBrace {
@@ -292,19 +315,22 @@ impl Parser {
         Ok(())
     }
 
+    /// Parse an expression statement
     fn parse_expression_statement(&mut self) -> Result<(), CompilerError> {
         self.parse_expression()?;
-        let _ = self.emit(Opcode::ADJ as i64);
-        let _ = self.emit(1);
+        self.emit(Opcode::ADJ as i64);
+        self.emit(1);
         self.match_token(TokenType::Semicolon)?;
         Ok(())
     }
 
+    /// Parse an expression
     fn parse_expression(&mut self) -> Result<(), CompilerError> {
         self.parse_assignment()?;
         Ok(())
     }
 
+    /// Parse an assignment expression
     fn parse_assignment(&mut self) -> Result<(), CompilerError> {
         let left = self.parse_equality()?;
         if self.current.token_type == TokenType::Assign {
@@ -315,8 +341,9 @@ impl Parser {
         Ok(left)
     }
 
+    /// Parse an equality expression
     fn parse_equality(&mut self) -> Result<(), CompilerError> {
-        let mut left = self.parse_relational()?;
+        let left = self.parse_relational()?;
         while self.current.token_type == TokenType::Eq || self.current.token_type == TokenType::Ne {
             let op = self.current.token_type;
             self.next_token()?;
@@ -330,8 +357,9 @@ impl Parser {
         Ok(left)
     }
 
+    /// Parse a relational expression
     fn parse_relational(&mut self) -> Result<(), CompilerError> {
-        let mut left = self.parse_additive()?;
+        let left = self.parse_additive()?;
         while matches!(self.current.token_type, 
             TokenType::Lt | TokenType::Gt | TokenType::Le | TokenType::Ge) {
             let op = self.current.token_type;
@@ -348,8 +376,9 @@ impl Parser {
         Ok(left)
     }
 
+    /// Parse an additive expression
     fn parse_additive(&mut self) -> Result<(), CompilerError> {
-        let mut left = self.parse_multiplicative()?;
+        let left = self.parse_multiplicative()?;
         while self.current.token_type == TokenType::Add || self.current.token_type == TokenType::Sub {
             let op = self.current.token_type;
             self.next_token()?;
@@ -363,8 +392,9 @@ impl Parser {
         Ok(left)
     }
 
+    /// Parse a multiplicative expression
     fn parse_multiplicative(&mut self) -> Result<(), CompilerError> {
-        let mut left = self.parse_unary()?;
+        let left = self.parse_unary()?;
         while matches!(self.current.token_type, 
             TokenType::Mul | TokenType::Div | TokenType::Mod) {
             let op = self.current.token_type;
@@ -380,6 +410,7 @@ impl Parser {
         Ok(left)
     }
 
+    /// Parse a unary expression
     fn parse_unary(&mut self) -> Result<(), CompilerError> {
         match self.current.token_type {
             TokenType::Add => {
@@ -389,31 +420,32 @@ impl Parser {
             TokenType::Sub => {
                 self.next_token()?;
                 self.parse_unary()?;
-                let _ = self.emit(Opcode::IMM as i64);
-                let _ = self.emit(-1);
-                let _ = self.emit(Opcode::MUL as i64);
+                self.emit(Opcode::IMM as i64);
+                self.emit(-1);
+                self.emit(Opcode::MUL as i64);
                 Ok(())
             }
             TokenType::Not => {
                 self.next_token()?;
                 self.parse_unary()?;
-                let _ = self.emit(Opcode::IMM as i64);
-                let _ = self.emit(0);
-                let _ = self.emit(Opcode::EQ as i64);
+                self.emit(Opcode::IMM as i64);
+                self.emit(0);
+                self.emit(Opcode::EQ as i64);
                 Ok(())
             }
             TokenType::BitNot => {
                 self.next_token()?;
                 self.parse_unary()?;
-                let _ = self.emit(Opcode::IMM as i64);
-                let _ = self.emit(-1);
-                let _ = self.emit(Opcode::XOR as i64);
+                self.emit(Opcode::IMM as i64);
+                self.emit(-1);
+                self.emit(Opcode::XOR as i64);
                 Ok(())
             }
             _ => self.parse_primary(),
         }
     }
 
+    /// Parse a primary expression
     fn parse_primary(&mut self) -> Result<(), CompilerError> {
         match self.current.token_type {
             TokenType::Num => {
@@ -474,6 +506,7 @@ impl Parser {
         }
     }
 
+    /// Parse function call arguments
     fn parse_arguments(&mut self) -> Result<usize, CompilerError> {
         let mut count = 0;
         if self.current.token_type != TokenType::RParen {
@@ -492,6 +525,7 @@ impl Parser {
         Ok(count)
     }
 
+    /// Emit a value to the code segment
     fn emit(&mut self, value: i64) -> usize {
         self.code.push(value);
         self.code.len() - 1

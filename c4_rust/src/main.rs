@@ -4,13 +4,11 @@ use std::process;
 
 use c4_rust::error::CompilerError;
 use c4_rust::lexer::Lexer;
-use c4_rust::vm::VirtualMachine;
 
 fn main() -> Result<(), CompilerError> {
     let args: Vec<String> = env::args().collect();
     
     let mut src_flag = false;
-    let mut debug_flag = false;
     let mut filename = None;
     
     // Parse command line arguments
@@ -19,7 +17,8 @@ fn main() -> Result<(), CompilerError> {
         if args[i] == "-s" {
             src_flag = true;
         } else if args[i] == "-d" {
-            debug_flag = true;
+            // Debug flag is recognized but not used yet
+            // Will be implemented when the VM is integrated
         } else {
             filename = Some(&args[i]);
             break;
@@ -45,8 +44,7 @@ fn main() -> Result<(), CompilerError> {
     println!("Successfully read source file: {}", filename.unwrap());
     println!("Source length: {} characters", source.len());
     
-    // TODO: Implement parser and code generation
-    // For now, just tokenize the source to demonstrate lexer functionality
+    // Tokenize the source to demonstrate lexer functionality
     if src_flag {
         println!("Tokenizing source file...");
         let mut lexer = Lexer::new(source, true);

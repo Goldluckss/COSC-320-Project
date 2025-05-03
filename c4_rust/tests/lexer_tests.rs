@@ -1,8 +1,3 @@
-//! Integration tests for the C4 Rust compiler
-//!
-//! These tests verify that the lexer, symbol table, and VM
-//! work together correctly to handle C code.
-
 use c4_rust::error::CompilerError;
 use c4_rust::lexer::Lexer;
 use c4_rust::symbol::SymbolTable;
@@ -131,8 +126,7 @@ fn test_lexer_and_symbol_table() -> Result<(), CompilerError> {
     Ok(())
 }
 
-// This test would be more comprehensive in the full implementation
-// with parser support, but demonstrates the integration approach
+// Function call test with smaller code size to avoid out of bounds error
 #[test]
 fn test_function_call_simulation() -> Result<(), CompilerError> {
     // Simulate a function call with the VM
@@ -155,11 +149,6 @@ fn test_function_call_simulation() -> Result<(), CompilerError> {
         Opcode::ADD as i64,         // Add the arguments
         Opcode::LEV as i64,         // Return from function
     ];
-    
-    // Create a symbol table for the test
-    let mut symbol_table = SymbolTable::new();
-    symbol_table.add("add", TokenType::Fun, Type::INT, 9); // Function at offset 9
-    symbol_table.add("main", TokenType::Fun, Type::INT, 0); // Main at offset 0
     
     // Execute the code
     let mut vm = VirtualMachine::new(code, Vec::new(), 1024, false);
