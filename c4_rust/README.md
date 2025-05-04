@@ -14,6 +14,7 @@ This Rust implementation maintains the same functionality as the original C4:
 
 - Self-hosting capability (can compile its own source code)
 - Virtual machine for executing compiled bytecode
+- Enhanced error handling with detailed diagnostics
 
 ## Enhanced Error Reporting
 
@@ -27,60 +28,33 @@ As a significant improvement over the original C4 compiler, this implementation 
 4. **Categorized Errors**: Errors are clearly categorized as lexer, parser, type, or VM errors
 5. **VM Debugging**: Runtime errors include information about the executed instruction and VM cycle
 
-### Example Error Messages:
-
-#### Lexer Error
-```
-Lexer error: Unexpected character '$'
-  --> 5:10
-   |
-5  | int x = $100;
-   |          ^
-```
-
-#### Parser Error
-```
-Parser error: Expected semicolon after expression
-  --> 7:15
-   |
-7  | int x = 5
-   |               ^
-Suggestion: Add a semicolon: 'int x = 5;'
-```
-
-#### Type Error
-```
-Type error: Cannot subtract character values directly
-  --> 12:8
-   |
-12 | char result = c - 'A';
-   |        ^
-Suggestion: Convert to int before subtraction: (int)c - 'A'
-```
-
-#### VM Error
-```
-VM error: Division by zero
-  When executing: DIV
-  At cycle: 42
-```
-
-## Building and Running
+## Building the Compiler
 
 ### Prerequisites
 
 - Rust and Cargo (install from [rustup.rs](https://rustup.rs))
 
-### Building
+### Building from Source
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/yourusername/c4_rust.git
+   cd c4_rust
+   ```
+
+2. Build the compiler with Cargo:
+   ```bash
+   cargo build --release
+   ```
+
+3. The compiler executable will be located at `./target/release/c4_rust`
+
+## Running the Compiler
+
+The C4 Rust compiler supports the same command-line options as the original C4:
 
 ```bash
-cargo build --release
-```
-
-### Running
-
-```bash
-# Compile and run a C file
+# Basic usage
 ./target/release/c4_rust source.c
 
 # Show source code and generated instructions during compilation
@@ -93,81 +67,135 @@ cargo build --release
 ./target/release/c4_rust -s -d source.c
 ```
 
+### Compiling Sample Programs
+
+Here are examples of compiling and running some sample C programs:
+
+#### Hello World
+
+Create a file named `hello.c`:
+```c
+int main() {
+    printf("Hello, World!\n");
+    return 0;
+}
+```
+
+Compile and run:
+```bash
+./target/release/c4_rust hello.c
+```
+
+#### Factorial Function
+
+Create a file named `factorial.c`:
+```c
+int factorial(int n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
+}
+
+int main() {
+    printf("5! = %d\n", factorial(5));
+    return 0;
+}
+```
+
+Compile and run:
+```bash
+./target/release/c4_rust factorial.c
+```
+
+#### Fibonacci Sequence
+
+Create a file named `fibonacci.c`:
+```c
+int fibonacci(int n) {
+    if (n <= 1) return n;
+    return fibonacci(n-1) + fibonacci(n-2);
+}
+
+int main() {
+    int i;
+    i = 0;
+    while (i < 10) {
+        printf("fibonacci(%d) = %d\n", i, fibonacci(i));
+        i = i + 1;
+    }
+    return 0;
+}
+```
+
+Compile and run:
+```bash
+./target/release/c4_rust fibonacci.c
+```
+
+## Self-hosting: Compiling the Original C4 Compiler
+
+One of the most interesting features of C4 is its ability to compile itself (self-hosting). You can test this with our Rust implementation by having it compile the original C4 source code:
+
+1. Download the original C4 source code:
+   ```bash
+   curl -O https://raw.githubusercontent.com/rswier/c4/master/c4.c
+   ```
+
+2. Compile it with our C4 Rust compiler:
+   ```bash
+   ./target/release/c4_rust c4.c
+   ```
+
+3. You can use the debugging flag to see the compilation and execution process:
+   ```bash
+   ./target/release/c4_rust -s -d c4.c
+   ```
+
+This demonstrates that our Rust implementation correctly handles the complete subset of C used in the original C4.
+
+## Running the Test Suite
+
+This project includes a comprehensive test suite to verify all compiler components:
+
+```bash
+# Run all tests
+cargo test
+
+# Run specific test categories
+cargo test lexer_     # Test the lexer
+cargo test parser_    # Test the parser
+cargo test symbol_    # Test the symbol table
+cargo test vm_        # Test the virtual machine
+
+# Run tests with verbose output
+cargo test -- --nocapture
+```
+
+### Running Tests for a Specific Feature
+
+You can also run tests for a specific feature:
+
+```bash
+# Test array operations
+cargo test test_arrays
+
+# Test function calls
+cargo test test_function_call
+
+# Test if-else statements
+cargo test test_if_else
+```
+
 ## Project Structure
 
-- `src/`
-  - `main.rs` - Entry point and command-line handling
-  - `lexer.rs` - Lexical analyzer for tokenizing source code
-  - `parser.rs` - Parser for generating bytecode from tokens
-  - `symbol.rs` - Symbol table for variable and function tracking
-  - `vm.rs` - Virtual machine for executing compiled bytecode
-  - `types.rs` - Type definitions used across the compiler
-  - `error.rs` - Enhanced error handling system with source context
+The C4 Rust compiler is organized into these modules:
 
-- `tests/` - Comprehensive test suite including:
-  - Unit tests for individual components
-  - Integration tests for end-to-end compilation and execution
-
-## Implementation Details
-
-### Lexer
-
-The lexer converts source code into tokens representing language constructs. It handles:
-
-- Keywords: `int`, `char`, `if`, `else`, `while`, `return`, `sizeof`, `enum`
-- Identifiers and numeric literals
-- String and character literals with escape sequences
-- Operators and punctuation
-- Comments and preprocessor directives (skipped)
-
-### Parser
-
-The parser analyzes tokens and generates bytecode. It handles:
-
-- Global variable declarations
-- Function declarations with parameters
-- Statements: `if`, `while`, `return`, blocks, expressions
-- Expressions with correct operator precedence
-- Type checking and conversion
-
-### Symbol Table
-
-The symbol table manages variable and function declarations:
-
-- Global variables and functions
-- Local variables with proper scoping
-- Support for different types (int, char, pointer)
-- Support for enum constants
-
-### Virtual Machine
-
-The VM executes the generated bytecode:
-
-- Register-based design
-- Support for all C4 opcodes
-- Stack management for function calls
-- Memory operations for variables and arrays
-- System calls (printf, etc.) implementation
-
-### Error Handling
-
-The enhanced error reporting system:
-
-- Tracks precise source locations (line and column)
-- Captures source context for displaying in error messages
-- Provides specific error messages tailored to the error type
-- Suggests potential fixes for common errors
-- Records VM state at the point of runtime errors
-
-## Comparison with Original C4
-
-This Rust implementation aims to be faithful to the original C4's functionality while taking advantage of Rust's safety features and more modern design:
-
-1. **Memory Safety**: Uses Rust's ownership model to prevent common C bugs
-2. **Error Handling**: Significantly improved error messages with source context
-3. **Unit Testing**: Comprehensive test suite for all components
-4. **Modularity**: Better separation of concerns into distinct modules
-5. **Documentation**: Thorough comments and documentation
+- `main.rs` - Entry point and command-line handling
+- `lexer.rs` - Lexical analyzer for tokenizing source code
+- `parser.rs` - Parser for generating bytecode from tokens
+- `symbol.rs` - Symbol table for variable and function tracking
+- `vm.rs` - Virtual machine for executing compiled bytecode
+- `types.rs` - Type definitions used across the compiler
+- `error.rs` - Enhanced error handling system with source context
 
 ## C4 Language Subset
 
@@ -200,31 +228,6 @@ The C4 compiler supports a small but powerful subset of C:
 - Functions: `int func(int param) { ... }`
 - Enums: `enum Name { VALUE1, VALUE2 };`
 
-## Examples
-
-### Hello World
-```c
-int main() {
-    printf("Hello, World!\n");
-    return 0;
-}
-```
-
-### Factorial Function
-```c
-int factorial(int n) {
-    if (n <= 1) {
-        return 1;
-    }
-    return n * factorial(n - 1);
-}
-
-int main() {
-    printf("5! = %d\n", factorial(5));
-    return 0;
-}
-```
-
 ## Limitations
 
 The C4 subset does not support:
@@ -236,11 +239,12 @@ The C4 subset does not support:
 - Standard library (except for a few system calls)
 - Preprocessor directives (except for comments)
 
-## License
+## Contributing
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+Contributions are welcome! Here are ways you can contribute:
 
-## Acknowledgments
-
-- Robert Swierczek for the original C4 compiler
-- The Rust community for the excellent language and tools
+1. Reporting bugs
+2. Suggesting enhancements
+3. Adding new features
+4. Improving documentation
+5. Submitting pull requests

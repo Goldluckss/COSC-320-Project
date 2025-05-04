@@ -1,1 +1,1 @@
-window.SIDEBAR_ITEMS = {"enum":["CompilerError"]};
+window.SIDEBAR_ITEMS = {"enum":["CompilerError"],"struct":["SourceLocation"]};

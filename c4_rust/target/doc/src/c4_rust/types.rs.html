@@ -254,11 +254,11 @@
     Return,
     Sizeof,
     While,
+    Void,   <span class="comment">// Added to match C4.c
     
-    <span class="comment">// Variable/function classes
+    // Variable/function classes
     </span>Num,
-    Str,  <span class="comment">// Added for string literals
-    </span>Fun,
+    Fun,
     Sys,
     Glo,
     Loc,
@@ -289,11 +289,7 @@
     </span>Dec,     <span class="comment">// --
     </span>Brak,    <span class="comment">// [
     
-    // Additional tokens
-    </span>Not,     <span class="comment">// !
-    </span>BitNot,  <span class="comment">// ~
-    
-    // Delimiters
+    // Single character tokens
     </span>Semicolon,  <span class="comment">// ;
     </span>LBrace,     <span class="comment">// {
     </span>RBrace,     <span class="comment">// }
@@ -302,6 +298,7 @@
     </span>RBracket,   <span class="comment">// ]
     </span>Comma,      <span class="comment">// ,
     </span>Colon,      <span class="comment">// :
+    </span>Tilde,      <span class="comment">// ~
 </span>}
 
 <span class="kw">impl </span>TokenType {
@@ -337,7 +334,8 @@
 
 <span class="doccomment">/// VM operation codes
 /// 
-/// These are the instructions understood by the VM
+/// These are the instructions understood by the VM,
+/// directly mapping to C4's opcodes
 </span><span class="attr">#[derive(Debug, PartialEq, Clone, Copy)]
 </span><span class="kw">pub enum </span>Opcode {
     LEA,    <span class="comment">// Load effective address
@@ -372,6 +370,7 @@
     </span>MUL,    <span class="comment">// Multiply
     </span>DIV,    <span class="comment">// Divide
     </span>MOD,    <span class="comment">// Modulo
+    </span>NEG,    <span class="comment">// Negate
     
     // System calls
     </span>OPEN,   <span class="comment">// Open file
@@ -399,9 +398,10 @@
             Opcode::LE =&gt; <span class="string">"LE"</span>, Opcode::GE =&gt; <span class="string">"GE"</span>, Opcode::SHL =&gt; <span class="string">"SHL"</span>, 
             Opcode::SHR =&gt; <span class="string">"SHR"</span>, Opcode::ADD =&gt; <span class="string">"ADD"</span>, Opcode::SUB =&gt; <span class="string">"SUB"</span>, 
             Opcode::MUL =&gt; <span class="string">"MUL"</span>, Opcode::DIV =&gt; <span class="string">"DIV"</span>, Opcode::MOD =&gt; <span class="string">"MOD"</span>, 
-            Opcode::OPEN =&gt; <span class="string">"OPEN"</span>, Opcode::READ =&gt; <span class="string">"READ"</span>, Opcode::CLOS =&gt; <span class="string">"CLOS"</span>, 
-            Opcode::PRTF =&gt; <span class="string">"PRTF"</span>, Opcode::MALC =&gt; <span class="string">"MALC"</span>, Opcode::FREE =&gt; <span class="string">"FREE"</span>, 
-            Opcode::MSET =&gt; <span class="string">"MSET"</span>, Opcode::MCMP =&gt; <span class="string">"MCMP"</span>, Opcode::EXIT =&gt; <span class="string">"EXIT"</span>,
+            Opcode::NEG =&gt; <span class="string">"NEG"</span>, Opcode::OPEN =&gt; <span class="string">"OPEN"</span>, Opcode::READ =&gt; <span class="string">"READ"</span>, 
+            Opcode::CLOS =&gt; <span class="string">"CLOS"</span>, Opcode::PRTF =&gt; <span class="string">"PRTF"</span>, Opcode::MALC =&gt; <span class="string">"MALC"</span>, 
+            Opcode::FREE =&gt; <span class="string">"FREE"</span>, Opcode::MSET =&gt; <span class="string">"MSET"</span>, Opcode::MCMP =&gt; <span class="string">"MCMP"</span>, 
+            Opcode::EXIT =&gt; <span class="string">"EXIT"</span>,
         }
     }
 }
@@ -412,7 +412,7 @@
 </span><span class="attr">#[derive(Debug, Clone, PartialEq, Copy)]
 </span><span class="kw">pub enum </span>Type {
     CHAR = <span class="number">0</span>,   <span class="comment">// Character type (8-bit)
-    </span>INT = <span class="number">1</span>,    <span class="comment">// Integer type (64-bit in this implementation)
+    </span>INT = <span class="number">1</span>,    <span class="comment">// Integer type (64-bit)
     </span>PTR = <span class="number">2</span>,    <span class="comment">// Pointer type (starts at 2 and increments for each level of indirection)
 </span>}
 
@@ -439,12 +439,12 @@
         }
     }
     
-    <span class="doccomment">/// Get the size of this type
+    <span class="doccomment">/// Get the size of this type in bytes
     </span><span class="kw">pub fn </span>size(<span class="self">self</span>) -&gt; usize {
         <span class="kw">match </span><span class="self">self </span>{
             Type::CHAR =&gt; <span class="number">1</span>,
-            <span class="kw">_ </span>=&gt; std::mem::size_of::&lt;i64&gt;(),
-        }
+            <span class="kw">_ </span>=&gt; std::mem::size_of::&lt;i64&gt;(), <span class="comment">// Use i64 for INT and PTR
+        </span>}
     }
 }
 

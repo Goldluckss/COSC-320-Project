@@ -322,7 +322,42 @@
 <a href="#321" id="321">321</a>
 <a href="#322" id="322">322</a>
 <a href="#323" id="323">323</a>
-<a href="#324" id="324">324</a></pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::types::{TokenType, Type};
+<a href="#324" id="324">324</a>
+<a href="#325" id="325">325</a>
+<a href="#326" id="326">326</a>
+<a href="#327" id="327">327</a>
+<a href="#328" id="328">328</a>
+<a href="#329" id="329">329</a>
+<a href="#330" id="330">330</a>
+<a href="#331" id="331">331</a>
+<a href="#332" id="332">332</a>
+<a href="#333" id="333">333</a>
+<a href="#334" id="334">334</a>
+<a href="#335" id="335">335</a>
+<a href="#336" id="336">336</a>
+<a href="#337" id="337">337</a>
+<a href="#338" id="338">338</a>
+<a href="#339" id="339">339</a>
+<a href="#340" id="340">340</a>
+<a href="#341" id="341">341</a>
+<a href="#342" id="342">342</a>
+<a href="#343" id="343">343</a>
+<a href="#344" id="344">344</a>
+<a href="#345" id="345">345</a>
+<a href="#346" id="346">346</a>
+<a href="#347" id="347">347</a>
+<a href="#348" id="348">348</a>
+<a href="#349" id="349">349</a>
+<a href="#350" id="350">350</a>
+<a href="#351" id="351">351</a>
+<a href="#352" id="352">352</a>
+<a href="#353" id="353">353</a>
+<a href="#354" id="354">354</a>
+<a href="#355" id="355">355</a>
+<a href="#356" id="356">356</a>
+<a href="#357" id="357">357</a>
+<a href="#358" id="358">358</a>
+<a href="#359" id="359">359</a></pre></div><pre class="rust"><code><span class="kw">use </span><span class="kw">crate</span>::types::{TokenType, Type};
 <span class="kw">use </span>std::collections::HashMap;
 
 <span class="doccomment">/// Symbol representation
@@ -336,16 +371,61 @@
     </span><span class="kw">pub </span>typ: Type,
     <span class="doccomment">/// Value or address
     </span><span class="kw">pub </span>value: i64,
+    
+    <span class="comment">// Fields for saving local symbol state when entering a new scope
+    </span><span class="kw">pub </span>h_class: <span class="prelude-ty">Option</span>&lt;TokenType&gt;,
+    <span class="kw">pub </span>h_type: <span class="prelude-ty">Option</span>&lt;Type&gt;,
+    <span class="kw">pub </span>h_value: <span class="prelude-ty">Option</span>&lt;i64&gt;,
+}
+
+<span class="kw">impl </span>Symbol {
+    <span class="doccomment">/// Create a new symbol
+    </span><span class="kw">pub fn </span>new(name: <span class="kw-2">&amp;</span>str, class: TokenType, typ: Type, value: i64) -&gt; <span class="self">Self </span>{
+        Symbol {
+            name: name.to_string(),
+            class,
+            typ,
+            value,
+            h_class: <span class="prelude-val">None</span>,
+            h_type: <span class="prelude-val">None</span>,
+            h_value: <span class="prelude-val">None</span>,
+        }
+    }
+    
+    <span class="doccomment">/// Save the current state of the symbol
+    </span><span class="kw">pub fn </span>save_state(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="self">self</span>.h_class = <span class="prelude-val">Some</span>(<span class="self">self</span>.class);
+        <span class="self">self</span>.h_type = <span class="prelude-val">Some</span>(<span class="self">self</span>.typ);
+        <span class="self">self</span>.h_value = <span class="prelude-val">Some</span>(<span class="self">self</span>.value);
+    }
+    
+    <span class="doccomment">/// Restore the saved state
+    </span><span class="kw">pub fn </span>restore_state(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(class) = <span class="self">self</span>.h_class {
+            <span class="self">self</span>.class = class;
+        }
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(typ) = <span class="self">self</span>.h_type {
+            <span class="self">self</span>.typ = typ;
+        }
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(value) = <span class="self">self</span>.h_value {
+            <span class="self">self</span>.value = value;
+        }
+        
+        <span class="comment">// Clear saved state
+        </span><span class="self">self</span>.h_class = <span class="prelude-val">None</span>;
+        <span class="self">self</span>.h_type = <span class="prelude-val">None</span>;
+        <span class="self">self</span>.h_value = <span class="prelude-val">None</span>;
+    }
 }
 
 <span class="doccomment">/// Symbol table for managing variables and functions
 </span><span class="kw">pub struct </span>SymbolTable {
     <span class="doccomment">/// List of all symbols
     </span>symbols: Vec&lt;Symbol&gt;,
-    <span class="doccomment">/// Stack of scope start indices
-    </span>scopes: Vec&lt;usize&gt;,
-    <span class="doccomment">/// Fast lookup by name (scope-prefixed)
+    <span class="doccomment">/// Map of symbol names to indices (for fast lookup)
     </span>name_map: HashMap&lt;String, usize&gt;,
+    <span class="doccomment">/// Current scope level (0 = global)
+    </span>scope_level: usize,
 }
 
 <span class="kw">impl </span>SymbolTable {
@@ -353,12 +433,12 @@
     </span><span class="kw">pub fn </span>new() -&gt; <span class="self">Self </span>{
         SymbolTable {
             symbols: Vec::new(),
-            scopes: <span class="macro">vec!</span>[<span class="number">0</span>], <span class="comment">// Start at global scope
-            </span>name_map: HashMap::new(),
-        }
+            name_map: HashMap::new(),
+            scope_level: <span class="number">0</span>, <span class="comment">// Start at global scope
+        </span>}
     }
     
-    <span class="doccomment">/// Add a symbol to the current scope
+    <span class="doccomment">/// Add a symbol to the symbol table
     ///
     /// # Arguments
     ///
@@ -371,158 +451,50 @@
     ///
     /// The index of the added symbol
     </span><span class="kw">pub fn </span>add(<span class="kw-2">&amp;mut </span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str, class: TokenType, typ: Type, value: i64) -&gt; usize {
+        <span class="comment">// Create a new symbol
+        </span><span class="kw">let </span>symbol = Symbol::new(name, class, typ, value);
         <span class="kw">let </span>index = <span class="self">self</span>.symbols.len();
         
-        <span class="comment">// Create the new symbol
-        </span><span class="kw">let </span>symbol = Symbol {
-            name: name.to_string(),
-            class,
-            typ,
-            value,
-        };
+        <span class="comment">// Add to the lookup map
+        </span><span class="self">self</span>.name_map.insert(name.to_string(), index);
         
-        <span class="comment">// Add to table
+        <span class="comment">// Add to the table
         </span><span class="self">self</span>.symbols.push(symbol);
-        
-        <span class="comment">// Update the name map for current scope only
-        </span><span class="kw">if </span>!<span class="self">self</span>.scopes.is_empty() {
-            <span class="kw">let </span>scope_prefix = <span class="kw">if </span><span class="self">self</span>.scopes.len() &gt; <span class="number">1 </span>{
-                <span class="comment">// Use scope level as prefix for local variables
-                </span><span class="macro">format!</span>(<span class="string">"{}:{}"</span>, <span class="self">self</span>.scopes.len() - <span class="number">1</span>, name)
-            } <span class="kw">else </span>{
-                <span class="comment">// Global scope
-                </span>name.to_string()
-            };
-            
-            <span class="self">self</span>.name_map.insert(scope_prefix, index);
-        }
         
         index
     }
     
-    <span class="doccomment">/// Find a symbol by name, searching from current scope up to global
+    <span class="doccomment">/// Get a symbol by name
     ///
     /// # Arguments
     ///
-    /// * `name` - Symbol name to search for
+    /// * `name` - Symbol name
     ///
     /// # Returns
     ///
-    /// The symbol if found, None otherwise
-    </span><span class="kw">pub fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;Symbol&gt; {
-        <span class="comment">// Start at current scope and work up
-        </span><span class="kw">for </span>scope_level <span class="kw">in </span>(<span class="number">0</span>..<span class="self">self</span>.scopes.len()).rev() {
-            <span class="kw">let </span>scope_prefix = <span class="kw">if </span>scope_level &gt; <span class="number">0 </span>{
-                <span class="comment">// Local scope
-                </span><span class="macro">format!</span>(<span class="string">"{}:{}"</span>, scope_level, name)
-            } <span class="kw">else </span>{
-                <span class="comment">// Global scope
-                </span>name.to_string()
-            };
-            
-            <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>index) = <span class="self">self</span>.name_map.get(<span class="kw-2">&amp;</span>scope_prefix) {
-                <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="self">self</span>.symbols[index].clone());
-            }
-        }
-        
-        <span class="comment">// Check for global without explicit scope prefix
-        </span><span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>index) = <span class="self">self</span>.name_map.get(name) {
-            <span class="kw">return </span><span class="prelude-val">Some</span>(<span class="self">self</span>.symbols[index].clone());
-        }
-        
-        <span class="prelude-val">None
-    </span>}
-    
-    <span class="doccomment">/// Check if a symbol exists in any accessible scope
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Symbol name to check
-    ///
-    /// # Returns
-    ///
-    /// True if the symbol exists in any accessible scope
-    </span><span class="kw">pub fn </span>exists(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; bool {
-        <span class="self">self</span>.get(name).is_some()
+    /// The symbol if found, or None
+    </span><span class="kw">pub fn </span>get(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Symbol&gt; {
+        <span class="self">self</span>.name_map.get(name).map(|<span class="kw-2">&amp;</span>index| <span class="kw-2">&amp;</span><span class="self">self</span>.symbols[index])
     }
     
-    <span class="doccomment">/// Check if a symbol exists in the current scope
+    <span class="doccomment">/// Get a mutable reference to a symbol
     ///
     /// # Arguments
     ///
-    /// * `name` - Symbol name to check
+    /// * `name` - Symbol name
     ///
     /// # Returns
     ///
-    /// True if the symbol exists in the current scope
-    </span><span class="kw">pub fn </span>exists_in_current_scope(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; bool {
-        <span class="kw">if </span><span class="self">self</span>.scopes.is_empty() {
-            <span class="kw">return </span><span class="bool-val">false</span>;
-        }
-        
-        <span class="kw">let </span>scope_level = <span class="self">self</span>.scopes.len() - <span class="number">1</span>;
-        <span class="kw">let </span>scope_prefix = <span class="kw">if </span>scope_level &gt; <span class="number">0 </span>{
-            <span class="macro">format!</span>(<span class="string">"{}:{}"</span>, scope_level, name)
+    /// Mutable reference to the symbol if found, or None
+    </span><span class="kw">pub fn </span>get_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>Symbol&gt; {
+        <span class="kw">if let </span><span class="prelude-val">Some</span>(<span class="kw-2">&amp;</span>index) = <span class="self">self</span>.name_map.get(name) {
+            <span class="prelude-val">Some</span>(<span class="kw-2">&amp;mut </span><span class="self">self</span>.symbols[index])
         } <span class="kw">else </span>{
-            name.to_string()
-        };
-        
-        <span class="self">self</span>.name_map.contains_key(<span class="kw-2">&amp;</span>scope_prefix)
+            <span class="prelude-val">None
+        </span>}
     }
     
-    <span class="doccomment">/// Enter a new scope
-    </span><span class="kw">pub fn </span>enter_scope(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-        <span class="comment">// Save the current symbol count at this scope boundary
-        </span><span class="self">self</span>.scopes.push(<span class="self">self</span>.symbols.len());
-    }
-    
-    <span class="doccomment">/// Exit the current scope
-    </span><span class="kw">pub fn </span>exit_scope(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-        <span class="kw">if </span><span class="self">self</span>.scopes.len() &lt;= <span class="number">1 </span>{
-            <span class="comment">// Don't exit global scope
-            </span><span class="kw">return</span>;
-        }
-        
-        <span class="comment">// Get the start index of the current scope
-        </span><span class="kw">let </span>start_index = <span class="self">self</span>.scopes.pop().unwrap();
-        
-        <span class="comment">// Remove scope entries from name map
-        </span><span class="kw">let </span>scope_level = <span class="self">self</span>.scopes.len();
-        
-        <span class="comment">// First collect keys to remove (can't modify while iterating)
-        </span><span class="kw">let </span>keys_to_remove: Vec&lt;String&gt; = <span class="self">self</span>.name_map.keys()
-            .filter(|k| k.starts_with(<span class="kw-2">&amp;</span><span class="macro">format!</span>(<span class="string">"{}:"</span>, scope_level)))
-            .cloned()
-            .collect();
-        
-        <span class="comment">// Then remove them
-        </span><span class="kw">for </span>key <span class="kw">in </span>keys_to_remove {
-            <span class="self">self</span>.name_map.remove(<span class="kw-2">&amp;</span>key);
-        }
-        
-        <span class="comment">// Keep only symbols from outer scopes
-        </span><span class="self">self</span>.symbols.truncate(start_index);
-    }
-    
-    <span class="doccomment">/// Find the main function
-    ///
-    /// # Returns
-    ///
-    /// The main function symbol if found, None otherwise
-    </span><span class="kw">pub fn </span>get_main(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;Symbol&gt; {
-        <span class="self">self</span>.get(<span class="string">"main"</span>)
-    }
-    
-    <span class="doccomment">/// Get all symbols
-    ///
-    /// # Returns
-    ///
-    /// A slice of all symbols
-    </span><span class="kw">pub fn </span>get_symbols(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw-2">&amp;</span>[Symbol] {
-        <span class="kw-2">&amp;</span><span class="self">self</span>.symbols
-    }
-    
-    <span class="doccomment">/// Get symbol by index
+    <span class="doccomment">/// Get a symbol by index
     ///
     /// # Arguments
     ///
@@ -530,28 +502,88 @@
     ///
     /// # Returns
     ///
-    /// The symbol at the given index, or None if out of bounds
+    /// The symbol at the given index, or None
     </span><span class="kw">pub fn </span>get_by_index(<span class="kw-2">&amp;</span><span class="self">self</span>, index: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Symbol&gt; {
         <span class="self">self</span>.symbols.get(index)
     }
     
-    <span class="doccomment">/// Get the number of scopes
+    <span class="doccomment">/// Get a mutable reference to a symbol by index
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Symbol index
     ///
     /// # Returns
     ///
-    /// The number of scopes
-    </span><span class="kw">pub fn </span>get_scope_count(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.scopes.len()
+    /// Mutable reference to the symbol at the given index, or None
+    </span><span class="kw">pub fn </span>get_by_index_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>, index: usize) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>Symbol&gt; {
+        <span class="self">self</span>.symbols.get_mut(index)
     }
     
-    <span class="doccomment">/// Get current scope level
+    <span class="doccomment">/// Check if a symbol exists
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Symbol name
     ///
     /// # Returns
     ///
-    /// The current scope level (0 for global)
+    /// True if the symbol exists, false otherwise
+    </span><span class="kw">pub fn </span>exists(<span class="kw-2">&amp;</span><span class="self">self</span>, name: <span class="kw-2">&amp;</span>str) -&gt; bool {
+        <span class="self">self</span>.name_map.contains_key(name)
+    }
+    
+    <span class="doccomment">/// Enter a new scope level
+    </span><span class="kw">pub fn </span>enter_scope(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="self">self</span>.scope_level += <span class="number">1</span>;
+    }
+    
+    <span class="doccomment">/// Exit the current scope level
+    </span><span class="kw">pub fn </span>exit_scope(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+        <span class="kw">if </span><span class="self">self</span>.scope_level &gt; <span class="number">0 </span>{
+            <span class="self">self</span>.scope_level -= <span class="number">1</span>;
+        }
+    }
+    
+    <span class="doccomment">/// Get the current scope level
     </span><span class="kw">pub fn </span>current_scope_level(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
-        <span class="self">self</span>.scopes.len() - <span class="number">1
-    </span>}
+        <span class="self">self</span>.scope_level
+    }
+    
+    <span class="doccomment">/// Get the number of symbols in the table
+    </span><span class="kw">pub fn </span>len(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; usize {
+        <span class="self">self</span>.symbols.len()
+    }
+    
+    <span class="doccomment">/// Check if the symbol table is empty
+    </span><span class="kw">pub fn </span>is_empty(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+        <span class="self">self</span>.symbols.is_empty()
+    }
+    
+    <span class="doccomment">/// Get an iterator over all symbols
+    </span><span class="kw">pub fn </span>iter(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;</span>Symbol&gt; {
+        <span class="self">self</span>.symbols.iter()
+    }
+    
+    <span class="doccomment">/// Iterate over all symbols with mutable access
+    </span><span class="kw">pub fn </span>iter_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="kw">impl </span>Iterator&lt;Item = <span class="kw-2">&amp;mut </span>Symbol&gt; {
+        <span class="self">self</span>.symbols.iter_mut()
+    }
+    
+    <span class="doccomment">/// Get the main function 
+    </span><span class="kw">pub fn </span>get_main(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Symbol&gt; {
+        <span class="self">self</span>.get(<span class="string">"main"</span>)
+    }
+    
+    <span class="doccomment">/// Get the current symbol being processed (last added)
+    </span><span class="kw">pub fn </span>current_symbol(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>Symbol&gt; {
+        <span class="self">self</span>.symbols.last()
+    }
+    
+    <span class="doccomment">/// Get a mutable reference to the current symbol
+    </span><span class="kw">pub fn </span>current_symbol_mut(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;mut </span>Symbol&gt; {
+        <span class="self">self</span>.symbols.last_mut()
+    }
 }
 
 <span class="attr">#[cfg(test)]
@@ -559,90 +591,128 @@
     <span class="kw">use super</span>::<span class="kw-2">*</span>;
     
     <span class="attr">#[test]
+    </span><span class="kw">fn </span>test_symbol_creation() {
+        <span class="kw">let </span>symbol = Symbol::new(<span class="string">"test"</span>, TokenType::Glo, Type::INT, <span class="number">42</span>);
+        
+        <span class="macro">assert_eq!</span>(symbol.name, <span class="string">"test"</span>);
+        <span class="macro">assert_eq!</span>(symbol.class, TokenType::Glo);
+        <span class="macro">assert_eq!</span>(symbol.typ, Type::INT);
+        <span class="macro">assert_eq!</span>(symbol.value, <span class="number">42</span>);
+        <span class="macro">assert_eq!</span>(symbol.h_class, <span class="prelude-val">None</span>);
+        <span class="macro">assert_eq!</span>(symbol.h_type, <span class="prelude-val">None</span>);
+        <span class="macro">assert_eq!</span>(symbol.h_value, <span class="prelude-val">None</span>);
+    }
+    
+    <span class="attr">#[test]
+    </span><span class="kw">fn </span>test_symbol_state() {
+        <span class="kw">let </span><span class="kw-2">mut </span>symbol = Symbol::new(<span class="string">"test"</span>, TokenType::Glo, Type::INT, <span class="number">42</span>);
+        
+        <span class="comment">// Save state
+        </span>symbol.save_state();
+        
+        <span class="comment">// Change values
+        </span>symbol.class = TokenType::Loc;
+        symbol.typ = Type::CHAR;
+        symbol.value = <span class="number">100</span>;
+        
+        <span class="comment">// Check that saved state is stored
+        </span><span class="macro">assert_eq!</span>(symbol.h_class, <span class="prelude-val">Some</span>(TokenType::Glo));
+        <span class="macro">assert_eq!</span>(symbol.h_type, <span class="prelude-val">Some</span>(Type::INT));
+        <span class="macro">assert_eq!</span>(symbol.h_value, <span class="prelude-val">Some</span>(<span class="number">42</span>));
+        
+        <span class="comment">// Restore state
+        </span>symbol.restore_state();
+        
+        <span class="comment">// Check restored values
+        </span><span class="macro">assert_eq!</span>(symbol.class, TokenType::Glo);
+        <span class="macro">assert_eq!</span>(symbol.typ, Type::INT);
+        <span class="macro">assert_eq!</span>(symbol.value, <span class="number">42</span>);
+        
+        <span class="comment">// Check that saved state is cleared
+        </span><span class="macro">assert_eq!</span>(symbol.h_class, <span class="prelude-val">None</span>);
+        <span class="macro">assert_eq!</span>(symbol.h_type, <span class="prelude-val">None</span>);
+        <span class="macro">assert_eq!</span>(symbol.h_value, <span class="prelude-val">None</span>);
+    }
+    
+    <span class="attr">#[test]
     </span><span class="kw">fn </span>test_symbol_table() {
         <span class="kw">let </span><span class="kw-2">mut </span>table = SymbolTable::new();
         
-        <span class="comment">// Add global symbols
-        </span>table.add(<span class="string">"x"</span>, TokenType::Glo, Type::INT, <span class="number">0</span>);
-        table.add(<span class="string">"y"</span>, TokenType::Glo, Type::CHAR, <span class="number">4</span>);
+        <span class="comment">// Add symbols
+        </span><span class="kw">let </span>idx1 = table.add(<span class="string">"var1"</span>, TokenType::Glo, Type::INT, <span class="number">10</span>);
+        <span class="kw">let </span>idx2 = table.add(<span class="string">"var2"</span>, TokenType::Glo, Type::CHAR, <span class="number">20</span>);
         
-        <span class="comment">// Enter a function scope
-        </span>table.enter_scope();
+        <span class="comment">// Check indices
+        </span><span class="macro">assert_eq!</span>(idx1, <span class="number">0</span>);
+        <span class="macro">assert_eq!</span>(idx2, <span class="number">1</span>);
         
-        <span class="comment">// Add local symbols
-        </span>table.add(<span class="string">"a"</span>, TokenType::Loc, Type::INT, <span class="number">0</span>);
-        table.add(<span class="string">"b"</span>, TokenType::Loc, Type::INT, <span class="number">1</span>);
+        <span class="comment">// Check get by name
+        </span><span class="kw">let </span>sym1 = table.get(<span class="string">"var1"</span>).unwrap();
+        <span class="macro">assert_eq!</span>(sym1.name, <span class="string">"var1"</span>);
+        <span class="macro">assert_eq!</span>(sym1.value, <span class="number">10</span>);
         
-        <span class="comment">// Enter a block scope
-        </span>table.enter_scope();
+        <span class="comment">// Check get by index
+        </span><span class="kw">let </span>sym2 = table.get_by_index(<span class="number">1</span>).unwrap();
+        <span class="macro">assert_eq!</span>(sym2.name, <span class="string">"var2"</span>);
+        <span class="macro">assert_eq!</span>(sym2.value, <span class="number">20</span>);
         
-        <span class="comment">// Add more locals
-        </span>table.add(<span class="string">"c"</span>, TokenType::Loc, Type::INT, <span class="number">2</span>);
+        <span class="comment">// Check exists
+        </span><span class="macro">assert!</span>(table.exists(<span class="string">"var1"</span>));
+        <span class="macro">assert!</span>(table.exists(<span class="string">"var2"</span>));
+        <span class="macro">assert!</span>(!table.exists(<span class="string">"var3"</span>));
         
-        <span class="comment">// Shadow a global
-        </span>table.add(<span class="string">"x"</span>, TokenType::Loc, Type::INT, <span class="number">3</span>);
+        <span class="comment">// Check length
+        </span><span class="macro">assert_eq!</span>(table.len(), <span class="number">2</span>);
+        <span class="macro">assert!</span>(!table.is_empty());
         
-        <span class="comment">// Check symbol lookup
-        </span><span class="kw">let </span>sym_c = table.get(<span class="string">"c"</span>).unwrap();
-        <span class="macro">assert_eq!</span>(sym_c.name, <span class="string">"c"</span>);
-        <span class="macro">assert_eq!</span>(sym_c.class, TokenType::Loc);
-        
-        <span class="comment">// The local x should shadow the global
-        </span><span class="kw">let </span>sym_x = table.get(<span class="string">"x"</span>).unwrap();
-        <span class="macro">assert_eq!</span>(sym_x.class, TokenType::Loc);
-        
-        <span class="comment">// Exit the block scope
-        </span>table.exit_scope();
-        
-        <span class="comment">// c should no longer be accessible
-        </span><span class="macro">assert!</span>(table.get(<span class="string">"c"</span>).is_none());
-        
-        <span class="comment">// x should now be the global
-        </span><span class="kw">let </span>sym_x = table.get(<span class="string">"x"</span>).unwrap();
-        <span class="macro">assert_eq!</span>(sym_x.class, TokenType::Glo);
-        
-        <span class="comment">// Exit the function scope
-        </span>table.exit_scope();
-        
-        <span class="comment">// a and b should no longer be accessible
-        </span><span class="macro">assert!</span>(table.get(<span class="string">"a"</span>).is_none());
-        <span class="macro">assert!</span>(table.get(<span class="string">"b"</span>).is_none());
+        <span class="comment">// Test scope levels
+        </span><span class="macro">assert_eq!</span>(table.current_scope_level(), <span class="number">0</span>);
+        table.enter_scope();
+        <span class="macro">assert_eq!</span>(table.current_scope_level(), <span class="number">1</span>);
+        table.enter_scope();
+        <span class="macro">assert_eq!</span>(table.current_scope_level(), <span class="number">2</span>);
+        table.exit_scope();
+        <span class="macro">assert_eq!</span>(table.current_scope_level(), <span class="number">1</span>);
+        table.exit_scope();
+        <span class="macro">assert_eq!</span>(table.current_scope_level(), <span class="number">0</span>);
     }
     
     <span class="attr">#[test]
-    </span><span class="kw">fn </span>test_exist_in_current_scope() {
+    </span><span class="kw">fn </span>test_symbol_modification() {
         <span class="kw">let </span><span class="kw-2">mut </span>table = SymbolTable::new();
         
-        <span class="comment">// Add global symbols
-        </span>table.add(<span class="string">"x"</span>, TokenType::Glo, Type::INT, <span class="number">0</span>);
+        <span class="comment">// Add a symbol
+        </span>table.add(<span class="string">"var"</span>, TokenType::Glo, Type::INT, <span class="number">10</span>);
         
-        <span class="macro">assert!</span>(table.exists_in_current_scope(<span class="string">"x"</span>));
-        <span class="macro">assert!</span>(!table.exists_in_current_scope(<span class="string">"y"</span>));
+        <span class="comment">// Modify the symbol
+        </span>{
+            <span class="kw">let </span>sym = table.get_mut(<span class="string">"var"</span>).unwrap();
+            sym.value = <span class="number">20</span>;
+        }
         
-        <span class="comment">// Enter a function scope
-        </span>table.enter_scope();
-        
-        <span class="macro">assert!</span>(!table.exists_in_current_scope(<span class="string">"x"</span>)); <span class="comment">// Not in current scope
-        </span><span class="macro">assert!</span>(table.exists(<span class="string">"x"</span>)); <span class="comment">// But still accessible
-        
-        // Add local symbols
-        </span>table.add(<span class="string">"a"</span>, TokenType::Loc, Type::INT, <span class="number">0</span>);
-        
-        <span class="macro">assert!</span>(table.exists_in_current_scope(<span class="string">"a"</span>));
+        <span class="comment">// Check the modification
+        </span><span class="kw">let </span>sym = table.get(<span class="string">"var"</span>).unwrap();
+        <span class="macro">assert_eq!</span>(sym.value, <span class="number">20</span>);
     }
     
     <span class="attr">#[test]
-    </span><span class="kw">fn </span>test_function_symbol() {
+    </span><span class="kw">fn </span>test_main_function() {
         <span class="kw">let </span><span class="kw-2">mut </span>table = SymbolTable::new();
         
-        <span class="comment">// Add a function
-        </span><span class="kw">let </span>func_addr = <span class="number">100</span>;
-        table.add(<span class="string">"main"</span>, TokenType::Fun, Type::INT, func_addr);
+        <span class="comment">// Add some symbols
+        </span>table.add(<span class="string">"var"</span>, TokenType::Glo, Type::INT, <span class="number">10</span>);
+        table.add(<span class="string">"func"</span>, TokenType::Fun, Type::INT, <span class="number">100</span>);
         
-        <span class="comment">// Find main
+        <span class="comment">// No main function yet
+        </span><span class="macro">assert!</span>(table.get_main().is_none());
+        
+        <span class="comment">// Add main function
+        </span>table.add(<span class="string">"main"</span>, TokenType::Fun, Type::INT, <span class="number">200</span>);
+        
+        <span class="comment">// Now we have a main function
         </span><span class="kw">let </span>main = table.get_main().unwrap();
         <span class="macro">assert_eq!</span>(main.name, <span class="string">"main"</span>);
         <span class="macro">assert_eq!</span>(main.class, TokenType::Fun);
-        <span class="macro">assert_eq!</span>(main.value, func_addr);
+        <span class="macro">assert_eq!</span>(main.value, <span class="number">200</span>);
     }
 }</code></pre></div></section></main></body></html>
