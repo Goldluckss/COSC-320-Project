@@ -545,9 +545,21 @@ impl Parser {
         self.next_token()?;
         
         // Parse condition
-        self.match_token(TokenType::LParen)?;
+        if self.current_token.token_type != TokenType::LParen {
+            return Err(CompilerError::ParserError(
+                format!("Expected (, got {:?}", self.current_token.token_type)
+            ));
+        }
+        self.next_token()?;
+        
         self.parse_expression()?;
-        self.match_token(TokenType::RParen)?;
+        
+        if self.current_token.token_type != TokenType::RParen {
+            return Err(CompilerError::ParserError(
+                format!("Expected ), got {:?}", self.current_token.token_type)
+            ));
+        }
+        self.next_token()?;
         
         // Generate code for condition
         let _jump_false_pos = self.emit(Opcode::BZ as i64);
@@ -589,9 +601,21 @@ impl Parser {
         let loop_start = self.code.len() as i64;
         
         // Parse condition
-        self.match_token(TokenType::LParen)?;
+        if self.current_token.token_type != TokenType::LParen {
+            return Err(CompilerError::ParserError(
+                format!("Expected (, got {:?}", self.current_token.token_type)
+            ));
+        }
+        self.next_token()?;
+        
         self.parse_expression()?;
-        self.match_token(TokenType::RParen)?;
+        
+        if self.current_token.token_type != TokenType::RParen {
+            return Err(CompilerError::ParserError(
+                format!("Expected ), got {:?}", self.current_token.token_type)
+            ));
+        }
+        self.next_token()?;
         
         // Generate code for condition
         let _jump_false_pos = self.emit(Opcode::BZ as i64);
@@ -628,7 +652,13 @@ impl Parser {
         self.emit(Opcode::LEV as i64);
         
         // Skip semicolon
-        self.match_token(TokenType::Semicolon)?;
+        if self.current_token.token_type == TokenType::Semicolon {
+            self.next_token()?;
+        } else {
+            return Err(CompilerError::ParserError(
+                format!("Expected semicolon, got {:?}", self.current_token.token_type)
+            ));
+        }
         
         Ok(())
     }
@@ -655,18 +685,31 @@ impl Parser {
         
         Ok(())
     }
+
+    /// Get a reference to the symbol table
+    pub fn get_symbol_table(&self) -> &SymbolTable {
+        &self.symbol_table
+    }
     
     /// Parse an expression statement
     fn parse_expression_statement(&mut self) -> Result<(), CompilerError> {
         // Parse expression
         self.parse_expression()?;
         
-        // Discard the result
-        self.emit(Opcode::ADJ as i64);
-        self.emit(1); // Pop one value
+        // Discard the result if it's not a return value
+        if self.current_token.token_type != TokenType::Return {
+            self.emit(Opcode::ADJ as i64);
+            self.emit(1); // Pop one value
+        }
         
         // Skip semicolon
-        self.match_token(TokenType::Semicolon)?;
+        if self.current_token.token_type == TokenType::Semicolon {
+            self.next_token()?;
+        } else {
+            return Err(CompilerError::ParserError(
+                format!("Expected semicolon, got {:?}", self.current_token.token_type)
+            ));
+        }
         
         Ok(())
     }
