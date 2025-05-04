@@ -160,9 +160,7 @@ impl Opcode {
             Opcode::NEG => "NEG", Opcode::OPEN => "OPEN", Opcode::READ => "READ", 
             Opcode::CLOS => "CLOS", Opcode::PRTF => "PRTF", Opcode::MALC => "MALC", 
             Opcode::FREE => "FREE", Opcode::MSET => "MSET", Opcode::MCMP => "MCMP", 
-            Opcode::OPEN => "OPEN", Opcode::READ => "READ", Opcode::CLOS => "CLOS", 
-            Opcode::PRTF => "PRTF", Opcode::MALC => "MALC", Opcode::FREE => "FREE", 
-            Opcode::MSET => "MSET", Opcode::MCMP => "MCMP", Opcode::EXIT => "EXIT",
+            Opcode::EXIT => "EXIT",
         }
     }
 }

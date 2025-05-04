@@ -479,7 +479,7 @@ impl Lexer {
     /// Read an identifier or keyword
     fn read_identifier(&mut self) -> Result<Token, CompilerError> {
         let start_pos = self.position;
-        let start_column = self.column;
+        let _start_column = self.column;
         
         // Read the entire identifier
         while let Some(ch) = self.current_char() {
@@ -513,7 +513,7 @@ impl Lexer {
     /// Read a numeric literal
     fn read_number(&mut self) -> Result<Token, CompilerError> {
         let start_pos = self.position;
-        let start_column = self.column;
+        let _start_column = self.column;
         
         // Check for hex or octal prefix
         let first_digit = self.current_char().unwrap();
@@ -543,7 +543,7 @@ impl Lexer {
                         });
                     }
                     
-                    let value = i64::from_str_radix(hex_str, 16).map_err(|e| {
+                    let value = i64::from_str_radix(hex_str, 16).map_err(|_e| {
                         CompilerError::LexerError {
                             message: format!("Invalid hexadecimal number: 0x{}", hex_str),
                             location: None,
@@ -569,7 +569,7 @@ impl Lexer {
                     }
                     
                     let oct_str = &self.source[oct_start..self.position];
-                    let value = i64::from_str_radix(oct_str, 8).map_err(|e| {
+                    let value = i64::from_str_radix(oct_str, 8).map_err(|_e| {
                         CompilerError::LexerError {
                             message: format!("Invalid octal number: {}", oct_str),
                             location: None,
@@ -611,7 +611,7 @@ impl Lexer {
         
         // Parse the decimal value
         let dec_str = &self.source[start_pos..self.position];
-        let value = dec_str.parse::<i64>().map_err(|e| {
+        let value = dec_str.parse::<i64>().map_err(|_e| {
             CompilerError::LexerError {
                 message: format!("Invalid decimal number: {}", dec_str),
                 location: None,

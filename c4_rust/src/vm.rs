@@ -34,7 +34,7 @@ impl VirtualMachine {
     /// * `stack_size` - Size of the stack
     /// * `debug` - Whether to print debug information
     pub fn new(code: Vec<i64>, data: Vec<u8>, stack_size: usize, debug: bool) -> Self {
-        let mut stack = vec![0; stack_size];
+        let stack = vec![0; stack_size];
         
         // Initialize stack pointer at the end of stack (like C4.c)
         let sp = stack_size;
@@ -831,7 +831,7 @@ impl VirtualMachine {
                             self.ax = (a as i64) - (b as i64);
                             self.sp += 3;
                             self.pc += 1;
-                            return Ok(continue); // Continue execution
+                            return Ok(0); // Return 0 to continue execution
                         }
                     }
                     
