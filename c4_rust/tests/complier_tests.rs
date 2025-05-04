@@ -26,8 +26,8 @@ fn compile_and_run(source: &str) -> Result<i64, CompilerError> {
 #[test]
 fn test_basic_program() -> Result<(), CompilerError> {
     let source = r#"
-        int main() {
-            return 42;
+        int main() { 
+            return 42; 
         }
     "#;
     
@@ -41,14 +41,22 @@ fn test_basic_program() -> Result<(), CompilerError> {
 fn test_arithmetic() -> Result<(), CompilerError> {
     let source = r#"
         int main() {
-            int a = 10;
-            int b = 5;
+            int a;
+            int b;
+            int add;
+            int sub;
+            int mul;
+            int div;
+            int mod;
             
-            int add = a + b;      // 15
-            int sub = a - b;      // 5
-            int mul = a * b;      // 50
-            int div = a / b;      // 2
-            int mod = a % b;      // 0
+            a = 10;
+            b = 5;
+            
+            add = a + b;      // 15
+            sub = a - b;      // 5
+            mul = a * b;      // 50
+            div = a / b;      // 2
+            mod = a % b;      // 0
             
             return add + sub + mul + div + mod;  // 72
         }
@@ -64,8 +72,12 @@ fn test_arithmetic() -> Result<(), CompilerError> {
 fn test_control_flow() -> Result<(), CompilerError> {
     let source = r#"
         int main() {
-            int x = 10;
-            int result = 0;
+            int x;
+            int result;
+            int i;
+            
+            x = 10;
+            result = 0;
             
             // Test if-else
             if (x > 5) {
@@ -75,7 +87,7 @@ fn test_control_flow() -> Result<(), CompilerError> {
             }
             
             // Test while loop - sum from 1 to 5
-            int i = 1;
+            i = 1;
             while (i <= 5) {
                 result = result + i;
                 i = i + 1;
@@ -135,8 +147,11 @@ fn test_pointers_and_arrays() -> Result<(), CompilerError> {
     let source = r#"
         int main() {
             // Test pointer operations
-            int x = 10;
-            int *ptr = &x;
+            int x;
+            int *ptr;
+            
+            x = 10;
+            ptr = &x;
             *ptr = 20;
             
             // Test array operations
@@ -159,17 +174,26 @@ fn test_pointers_and_arrays() -> Result<(), CompilerError> {
 fn test_bit_operations() -> Result<(), CompilerError> {
     let source = r#"
         int main() {
+            int a;
+            int b;
+            int c;
+            int d;
+            int e;
+            int f;
+            int g;
+            int h;
+            
             // Bitwise operations
-            int a = 5 & 3;           // 101 & 011 = 001 = 1
-            int b = 5 | 3;           // 101 | 011 = 111 = 7
-            int c = 5 ^ 3;           // 101 ^ 011 = 110 = 6
-            int d = 1 << 3;          // 1 << 3 = 8
-            int e = 8 >> 2;          // 8 >> 2 = 2
+            a = 5 & 3;           // 101 & 011 = 001 = 1
+            b = 5 | 3;           // 101 | 011 = 111 = 7
+            c = 5 ^ 3;           // 101 ^ 011 = 110 = 6
+            d = 1 << 3;          // 1 << 3 = 8
+            e = 8 >> 2;          // 8 >> 2 = 2
             
             // Logical operations  
-            int f = 1 && 1;          // 1
-            int g = 1 || 0;          // 1
-            int h = !0;              // 1
+            f = 1 && 1;          // 1
+            g = 1 || 0;          // 1
+            h = !0;              // 1
             
             return a + b + c + d + e + f + g + h;  // 1+7+6+8+2+1+1+1 = 27
         }
@@ -186,8 +210,11 @@ fn test_complex_program() -> Result<(), CompilerError> {
     let source = r#"
         // Calculate sum of squares from 1 to n
         int sum_squares(int n) {
-            int sum = 0;
-            int i = 1;
+            int sum;
+            int i;
+            
+            sum = 0;
+            i = 1;
             
             while (i <= n) {
                 sum = sum + i * i;
@@ -199,8 +226,11 @@ fn test_complex_program() -> Result<(), CompilerError> {
         
         // Calculate square of sum from 1 to n
         int square_sum(int n) {
-            int sum = 0;
-            int i = 1;
+            int sum;
+            int i;
+            
+            sum = 0;
+            i = 1;
             
             while (i <= n) {
                 sum = sum + i;

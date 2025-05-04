@@ -1,0 +1,9 @@
+(function() {
+    var implementors = Object.fromEntries([["c4_rust",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.84.0/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"enum\" href=\"c4_rust/error/enum.CompilerError.html\" title=\"enum c4_rust::error::CompilerError\">CompilerError</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.84.0/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"enum\" href=\"c4_rust/types/enum.Opcode.html\" title=\"enum c4_rust::types::Opcode\">Opcode</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.84.0/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"enum\" href=\"c4_rust/types/enum.TokenType.html\" title=\"enum c4_rust::types::TokenType\">TokenType</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.84.0/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"enum\" href=\"c4_rust/types/enum.Type.html\" title=\"enum c4_rust::types::Type\">Type</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.84.0/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"c4_rust/lexer/struct.Token.html\" title=\"struct c4_rust::lexer::Token\">Token</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/1.84.0/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"c4_rust/symbol/struct.Symbol.html\" title=\"struct c4_rust::symbol::Symbol\">Symbol</a>"]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":57,"fragment_lengths":[1548]}

@@ -32,12 +32,15 @@ impl VirtualMachine {
     /// * `stack_size` - Size of the stack
     /// * `debug` - Whether to print debug information
     pub fn new(code: Vec<i64>, data: Vec<u8>, stack_size: usize, debug: bool) -> Self {
-        let stack = vec![0; stack_size];
+        let mut stack = vec![0; stack_size];
+        
+        // Initialize stack pointer at the end of stack (like C4.c)
+        let sp = stack_size;
         
         VirtualMachine {
             pc: 0,
-            sp: stack_size,  // Initialize at end of stack
-            bp: stack_size,  // Initialize at end of stack
+            sp,  // Initialize at end of stack
+            bp: sp,  // Initialize at end of stack
             ax: 0,
             code,
             stack,
@@ -58,10 +61,10 @@ impl VirtualMachine {
     ///
     /// The exit code from the program
     pub fn run(&mut self, entry_point: usize, args: &[String]) -> Result<i64, CompilerError> {
-        // Setup stack for main()
+        // Setup stack for main() - matching C4.c's setup
         self.pc = entry_point;
         
-        // Setup argc, argv
+        // Setup argc, argv - matching C4.c's stack setup
         self.sp -= 1;  // Decrement before storing
         self.stack[self.sp] = args.len() as i64;
         
@@ -76,13 +79,6 @@ impl VirtualMachine {
         // Main execution loop
         loop {
             self.cycle += 1;
-            
-            // Check if PC is valid
-            if self.pc >= self.code.len() {
-                return Err(CompilerError::VMError(
-                    format!("Program counter out of bounds: {}", self.pc)
-                ));
-            }
             
             // Fetch instruction
             let op = self.code[self.pc];
@@ -157,20 +153,13 @@ impl VirtualMachine {
                     self.execute_instruction(op)?;
                 }
             }
-            
-            // Check stack overflow/underflow
-            if self.sp >= self.stack.len() {
-                return Err(CompilerError::VMError(
-                    format!("Stack pointer out of bounds: {}", self.sp)
-                ));
-            }
         }
     }
     
     fn execute_instruction(&mut self, op: i64) -> Result<(), CompilerError> {
         match op {
             i if i == Opcode::LEA as i64 => {
-                // Load effective address
+                // Load effective address - matching C4.c's implementation
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
@@ -186,224 +175,95 @@ impl VirtualMachine {
                 self.pc += 2;
             },
             i if i == Opcode::JMP as i64 => {
-                // Jump
+                // Jump - matching C4.c's implementation
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
-                
-                let jump_addr = self.code[self.pc + 1] as usize;
-                if jump_addr >= self.code.len() {
-                    return Err(CompilerError::VMError(
-                        format!("Jump target out of bounds: {}", jump_addr)
-                    ));
-                }
-                self.pc = jump_addr;
+                self.pc = self.code[self.pc + 1] as usize;
             },
             i if i == Opcode::JSR as i64 => {
-                // Jump to subroutine
+                // Jump to subroutine - matching C4.c's implementation
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
-                
-                // Check stack bounds before pushing return address
-                if self.sp == 0 {
-                    return Err(CompilerError::VMError("Stack overflow".to_string()));
-                }
-                
-                // Get jump address and validate it
-                let jump_addr = self.code[self.pc + 1] as usize;
-                if jump_addr >= self.code.len() {
-                    return Err(CompilerError::VMError(
-                        format!("Jump target out of bounds: {}", jump_addr)
-                    ));
-                }
-                
-                // Store return address (next instruction after JSR)
                 self.sp -= 1;
                 self.stack[self.sp] = (self.pc + 2) as i64;
-                
-                // Jump to function
-                self.pc = jump_addr;
+                self.pc = self.code[self.pc + 1] as usize;
             },
             i if i == Opcode::BZ as i64 => {
-                // Branch if zero
+                // Branch if zero - matching C4.c's implementation
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
-                
-                let jump_addr = self.code[self.pc + 1] as usize;
-                if jump_addr >= self.code.len() {
-                    return Err(CompilerError::VMError(
-                        format!("Branch target out of bounds: {}", jump_addr)
-                    ));
-                }
-                
                 if self.ax == 0 {
-                    self.pc = jump_addr;
+                    self.pc = self.code[self.pc + 1] as usize;
                 } else {
                     self.pc += 2;
                 }
             },
             i if i == Opcode::BNZ as i64 => {
-                // Branch if not zero
+                // Branch if not zero - matching C4.c's implementation
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
-                
-                let jump_addr = self.code[self.pc + 1] as usize;
-                if jump_addr >= self.code.len() {
-                    return Err(CompilerError::VMError(
-                        format!("Branch target out of bounds: {}", jump_addr)
-                    ));
-                }
-                
                 if self.ax != 0 {
-                    self.pc = jump_addr;
+                    self.pc = self.code[self.pc + 1] as usize;
                 } else {
                     self.pc += 2;
                 }
             },
             i if i == Opcode::ENT as i64 => {
-                // Enter subroutine (setup new stack frame)
+                // Enter subroutine - matching C4.c's implementation
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
-                
-                // Save old base pointer
-                if self.sp == 0 {
-                    return Err(CompilerError::VMError("Stack overflow".to_string()));
-                }
-                
                 self.sp -= 1;
                 self.stack[self.sp] = self.bp as i64;
-                
-                // Update base pointer to current stack position
                 self.bp = self.sp;
-                
-                // Allocate space for local variables
-                let locals = self.code[self.pc + 1] as usize;
-                if locals > self.sp {
-                    return Err(CompilerError::VMError("Stack overflow".to_string()));
-                }
-                
-                self.sp -= locals;
-                
-                // Move to next instruction
+                self.sp -= self.code[self.pc + 1] as usize;
                 self.pc += 2;
             },
             i if i == Opcode::ADJ as i64 => {
-                // Adjust stack (pop arguments)
+                // Adjust stack - matching C4.c's implementation
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
-                
-                let count = self.code[self.pc + 1] as usize;
-                self.sp += count;
-                
-                if self.sp > self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
-                }
-                
+                self.sp += self.code[self.pc + 1] as usize;
                 self.pc += 2;
             },
             i if i == Opcode::LEV as i64 => {
-                // Leave subroutine (restore previous stack frame)
-                
-                // Restore stack pointer to base pointer
+                // Leave subroutine - matching C4.c's implementation
                 self.sp = self.bp;
-                
-                // Restore base pointer
-                if self.sp >= self.stack.len() {
-                    return Err(CompilerError::VMError("Invalid base pointer in LEV".to_string()));
-                }
                 self.bp = self.stack[self.sp] as usize;
                 self.sp += 1;
-                
-                // Jump to return address
-                if self.sp >= self.stack.len() {
-                    return Err(CompilerError::VMError("Invalid return address in LEV".to_string()));
-                }
-                
-                let ret_addr = self.stack[self.sp] as usize;
+                self.pc = self.stack[self.sp] as usize;
                 self.sp += 1;
-                
-                // Validate return address
-                if ret_addr >= self.code.len() {
-                    return Err(CompilerError::VMError(
-                        format!("Return address out of bounds: {}", ret_addr)
-                    ));
-                }
-                
-                self.pc = ret_addr;
             },
             i if i == Opcode::LI as i64 => {
-                // Load integer from memory address in AX
-                let addr = self.ax as usize;
-                
-                if addr >= self.stack.len() {
-                    return Err(CompilerError::VMError(
-                        format!("Memory access out of bounds (LI): {}", addr)
-                    ));
-                }
-                
-                self.ax = self.stack[addr];
+                // Load integer - matching C4.c's implementation
+                self.ax = self.stack[self.ax as usize];
                 self.pc += 1;
             },
             i if i == Opcode::LC as i64 => {
-                // Load character from memory address in AX
-                let addr = self.ax as usize;
-                
-                if addr >= self.data.len() {
-                    return Err(CompilerError::VMError(
-                        format!("Memory access out of bounds (LC): {}", addr)
-                    ));
-                }
-                
-                self.ax = self.data[addr] as i64;
+                // Load character - matching C4.c's implementation
+                self.ax = self.data[self.ax as usize] as i64;
                 self.pc += 1;
             },
             i if i == Opcode::SI as i64 => {
-                // Store integer (value in AX) to address on stack top
-                if self.sp >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow in SI".to_string()));
-                }
-                
+                // Store integer - matching C4.c's implementation
                 let addr = self.stack[self.sp] as usize;
                 self.sp += 1;
-                
-                if addr >= self.stack.len() {
-                    return Err(CompilerError::VMError(
-                        format!("Memory access out of bounds (SI): {}", addr)
-                    ));
-                }
-                
                 self.stack[addr] = self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::SC as i64 => {
-                // Store character (value in AX) to address on stack top
-                if self.sp >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow in SC".to_string()));
-                }
-                
-                let addr = self.stack[self.sp] as usize;
+                // Store character - matching C4.c's implementation
+                self.data[self.stack[self.sp] as usize] = self.ax as u8;
                 self.sp += 1;
-                
-                if addr >= self.data.len() {
-                    return Err(CompilerError::VMError(
-                        format!("Memory access out of bounds (SC): {}", addr)
-                    ));
-                }
-                
-                self.data[addr] = self.ax as u8;
                 self.pc += 1;
             },
             i if i == Opcode::PSH as i64 => {
-                // Push accumulator to stack
-                if self.sp == 0 {
-                    return Err(CompilerError::VMError("Stack overflow in PSH".to_string()));
-                }
-                
+                // Push - matching C4.c's implementation
                 self.sp -= 1;
                 self.stack[self.sp] = self.ax;
                 self.pc += 1;
