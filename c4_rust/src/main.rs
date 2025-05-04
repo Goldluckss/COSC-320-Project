@@ -1,9 +1,6 @@
 use std::env;
 use std::fs;
 use std::process;
-use std::path::Path;
-
-use c4_rust::error::CompilerError;
 use c4_rust::parser::Parser;
 use c4_rust::vm::VirtualMachine;
 
@@ -85,7 +82,7 @@ fn main() {
         // Print code segment summary
         println!("\nCode segment size: {} bytes", parser.get_code().len() * 8);
         println!("Data segment size: {} bytes", parser.get_data().len());
-        println!("main() function found at offset: {}", main_addr);
+        println!("main() function found at offset: {}", (*main_addr).value as usize);
         
         // Exit with success
         process::exit(0);
@@ -100,7 +97,7 @@ fn main() {
     let prog_args: Vec<String> = args.iter().skip(i + 1).cloned().collect();
     
     // Run the program
-    match vm.run(main_addr, &prog_args) {
+    match vm.run(main_addr.value as usize, &prog_args) {
         Ok(exit_code) => {
             if debug_flag {
                 println!("Program exited with code: {}", exit_code);
