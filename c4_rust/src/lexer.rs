@@ -81,6 +81,7 @@ impl Lexer {
     }
     
     /// Peek at the next character without advancing
+    #[allow(dead_code)]
     fn peek_char(&self) -> Option<char> {
         self.source.chars().nth(self.position + 1)
     }

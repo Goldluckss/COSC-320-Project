@@ -1,6 +1,5 @@
 use crate::error::CompilerError;
 use crate::types::Opcode;
-use std::io::{self, Write};
 
 /// Virtual Machine for executing compiled C4 code
 /// 
@@ -191,27 +190,56 @@ impl VirtualMachine {
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
-                self.pc = self.code[self.pc + 1] as usize;
+                
+                let jump_addr = self.code[self.pc + 1] as usize;
+                if jump_addr >= self.code.len() {
+                    return Err(CompilerError::VMError(
+                        format!("Jump target out of bounds: {}", jump_addr)
+                    ));
+                }
+                self.pc = jump_addr;
             },
             i if i == Opcode::JSR as i64 => {
                 // Jump to subroutine
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
+                
+                // Check stack bounds before pushing return address
                 if self.sp == 0 {
                     return Err(CompilerError::VMError("Stack overflow".to_string()));
                 }
-                self.sp -= 1;  // Decrement first
-                self.stack[self.sp] = self.pc as i64 + 2;  // Then store return address
-                self.pc = self.code[self.pc + 1] as usize;  // Jump to function
+                
+                // Get jump address and validate it
+                let jump_addr = self.code[self.pc + 1] as usize;
+                if jump_addr >= self.code.len() {
+                    return Err(CompilerError::VMError(
+                        format!("Jump target out of bounds: {}", jump_addr)
+                    ));
+                }
+                
+                // Store return address (next instruction after JSR)
+                self.sp -= 1;
+                self.stack[self.sp] = (self.pc + 2) as i64;
+                
+                // Jump to function
+                self.pc = jump_addr;
             },
             i if i == Opcode::BZ as i64 => {
                 // Branch if zero
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
+                
+                let jump_addr = self.code[self.pc + 1] as usize;
+                if jump_addr >= self.code.len() {
+                    return Err(CompilerError::VMError(
+                        format!("Branch target out of bounds: {}", jump_addr)
+                    ));
+                }
+                
                 if self.ax == 0 {
-                    self.pc = self.code[self.pc + 1] as usize;
+                    self.pc = jump_addr;
                 } else {
                     self.pc += 2;
                 }
@@ -221,8 +249,16 @@ impl VirtualMachine {
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
+                
+                let jump_addr = self.code[self.pc + 1] as usize;
+                if jump_addr >= self.code.len() {
+                    return Err(CompilerError::VMError(
+                        format!("Branch target out of bounds: {}", jump_addr)
+                    ));
+                }
+                
                 if self.ax != 0 {
-                    self.pc = self.code[self.pc + 1] as usize;
+                    self.pc = jump_addr;
                 } else {
                     self.pc += 2;
                 }
@@ -232,259 +268,349 @@ impl VirtualMachine {
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
+                
+                // Save old base pointer
                 if self.sp == 0 {
                     return Err(CompilerError::VMError("Stack overflow".to_string()));
                 }
-                self.stack[self.sp] = self.bp as i64;
+                
                 self.sp -= 1;
+                self.stack[self.sp] = self.bp as i64;
+                
+                // Update base pointer to current stack position
                 self.bp = self.sp;
                 
+                // Allocate space for local variables
                 let locals = self.code[self.pc + 1] as usize;
-                if self.sp < locals {
+                if locals > self.sp {
                     return Err(CompilerError::VMError("Stack overflow".to_string()));
                 }
+                
                 self.sp -= locals;
+                
+                // Move to next instruction
                 self.pc += 2;
             },
             i if i == Opcode::ADJ as i64 => {
-                // Adjust stack
+                // Adjust stack (pop arguments)
                 if self.pc + 1 >= self.code.len() {
                     return Err(CompilerError::VMError("Unexpected end of code".to_string()));
                 }
+                
                 let count = self.code[self.pc + 1] as usize;
                 self.sp += count;
-                if self.sp >= self.stack.len() {
+                
+                if self.sp > self.stack.len() {
                     return Err(CompilerError::VMError("Stack underflow".to_string()));
                 }
+                
                 self.pc += 2;
             },
             i if i == Opcode::LEV as i64 => {
-                // Leave subroutine
-                self.sp = self.bp;  // Restore stack pointer
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Leave subroutine (restore previous stack frame)
+                
+                // Restore stack pointer to base pointer
+                self.sp = self.bp;
+                
+                // Restore base pointer
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Invalid base pointer in LEV".to_string()));
                 }
-                self.bp = self.stack[self.sp] as usize;  // Restore base pointer
-                if self.sp + 2 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                self.bp = self.stack[self.sp] as usize;
+                self.sp += 1;
+                
+                // Jump to return address
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Invalid return address in LEV".to_string()));
                 }
-                self.pc = self.stack[self.sp + 1] as usize;  // Restore program counter
+                
+                let ret_addr = self.stack[self.sp] as usize;
+                self.sp += 1;
+                
+                // Validate return address
+                if ret_addr >= self.code.len() {
+                    return Err(CompilerError::VMError(
+                        format!("Return address out of bounds: {}", ret_addr)
+                    ));
+                }
+                
+                self.pc = ret_addr;
             },
             i if i == Opcode::LI as i64 => {
-                // Load integer
-                if self.ax < 0 || self.ax as usize >= self.stack.len() {
-                    return Err(CompilerError::VMError("Invalid memory access".to_string()));
+                // Load integer from memory address in AX
+                let addr = self.ax as usize;
+                
+                if addr >= self.stack.len() {
+                    return Err(CompilerError::VMError(
+                        format!("Memory access out of bounds (LI): {}", addr)
+                    ));
                 }
-                self.ax = self.stack[self.ax as usize];
+                
+                self.ax = self.stack[addr];
                 self.pc += 1;
             },
             i if i == Opcode::LC as i64 => {
-                // Load character
-                if self.ax < 0 || self.ax as usize >= self.data.len() {
-                    return Err(CompilerError::VMError("Invalid memory access".to_string()));
+                // Load character from memory address in AX
+                let addr = self.ax as usize;
+                
+                if addr >= self.data.len() {
+                    return Err(CompilerError::VMError(
+                        format!("Memory access out of bounds (LC): {}", addr)
+                    ));
                 }
-                self.ax = self.data[self.ax as usize] as i64;
+                
+                self.ax = self.data[addr] as i64;
                 self.pc += 1;
             },
             i if i == Opcode::SI as i64 => {
-                // Store integer
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Store integer (value in AX) to address on stack top
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in SI".to_string()));
                 }
-                let addr = self.stack[self.sp];
+                
+                let addr = self.stack[self.sp] as usize;
                 self.sp += 1;
-                if addr < 0 || addr as usize >= self.stack.len() {
-                    return Err(CompilerError::VMError("Invalid memory access".to_string()));
+                
+                if addr >= self.stack.len() {
+                    return Err(CompilerError::VMError(
+                        format!("Memory access out of bounds (SI): {}", addr)
+                    ));
                 }
-                self.stack[addr as usize] = self.ax;
+                
+                self.stack[addr] = self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::SC as i64 => {
-                // Store character
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Store character (value in AX) to address on stack top
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in SC".to_string()));
                 }
-                let addr = self.stack[self.sp];
+                
+                let addr = self.stack[self.sp] as usize;
                 self.sp += 1;
-                if addr < 0 || addr as usize >= self.data.len() {
-                    return Err(CompilerError::VMError("Invalid memory access".to_string()));
+                
+                if addr >= self.data.len() {
+                    return Err(CompilerError::VMError(
+                        format!("Memory access out of bounds (SC): {}", addr)
+                    ));
                 }
-                self.data[addr as usize] = self.ax as u8;
+                
+                self.data[addr] = self.ax as u8;
                 self.pc += 1;
             },
             i if i == Opcode::PSH as i64 => {
-                // Push accumulator onto stack
+                // Push accumulator to stack
                 if self.sp == 0 {
-                    return Err(CompilerError::VMError("Stack overflow".to_string()));
+                    return Err(CompilerError::VMError("Stack overflow in PSH".to_string()));
                 }
-                self.sp -= 1;  // Decrement first
-                self.stack[self.sp] = self.ax;  // Then store
+                
+                self.sp -= 1;
+                self.stack[self.sp] = self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::OR as i64 => {
-                // Bitwise OR
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Bitwise OR: stack top | AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in OR".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = a | self.ax;
+                
+                self.ax = value | self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::XOR as i64 => {
-                // Bitwise XOR
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Bitwise XOR: stack top ^ AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in XOR".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = a ^ self.ax;
+                
+                self.ax = value ^ self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::AND as i64 => {
-                // Bitwise AND
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Bitwise AND: stack top & AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in AND".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = a & self.ax;
+                
+                self.ax = value & self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::EQ as i64 => {
-                // Equal
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Equal: stack top == AX -> AX (1 if true, 0 if false)
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in EQ".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = (a == self.ax) as i64;
+                
+                self.ax = (value == self.ax) as i64;
                 self.pc += 1;
             },
             i if i == Opcode::NE as i64 => {
-                // Not equal
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Not Equal: stack top != AX -> AX (1 if true, 0 if false)
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in NE".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = (a != self.ax) as i64;
+                
+                self.ax = (value != self.ax) as i64;
                 self.pc += 1;
             },
             i if i == Opcode::LT as i64 => {
-                // Less than
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Less Than: stack top < AX -> AX (1 if true, 0 if false)
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in LT".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = (a < self.ax) as i64;
+                
+                self.ax = (value < self.ax) as i64;
                 self.pc += 1;
             },
             i if i == Opcode::GT as i64 => {
-                // Greater than
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Greater Than: stack top > AX -> AX (1 if true, 0 if false)
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in GT".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = (a > self.ax) as i64;
+                
+                self.ax = (value > self.ax) as i64;
                 self.pc += 1;
             },
             i if i == Opcode::LE as i64 => {
-                // Less than or equal
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Less Than or Equal: stack top <= AX -> AX (1 if true, 0 if false)
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in LE".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = (a <= self.ax) as i64;
+                
+                self.ax = (value <= self.ax) as i64;
                 self.pc += 1;
             },
             i if i == Opcode::GE as i64 => {
-                // Greater than or equal
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Greater Than or Equal: stack top >= AX -> AX (1 if true, 0 if false)
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in GE".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = (a >= self.ax) as i64;
+                
+                self.ax = (value >= self.ax) as i64;
                 self.pc += 1;
             },
             i if i == Opcode::SHL as i64 => {
-                // Shift left
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Shift Left: stack top << AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in SHL".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = a << self.ax;
+                
+                self.ax = value << self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::SHR as i64 => {
-                // Shift right
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Shift Right: stack top >> AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in SHR".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = a >> self.ax;
+                
+                self.ax = value >> self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::ADD as i64 => {
-                // Add
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Add: stack top + AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in ADD".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = a + self.ax;
+                
+                self.ax = value + self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::SUB as i64 => {
-                // Subtract
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Subtract: stack top - AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in SUB".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = a - self.ax;
+                
+                self.ax = value - self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::MUL as i64 => {
-                // Multiply
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Multiply: stack top * AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in MUL".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
-                self.ax = a * self.ax;
+                
+                self.ax = value * self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::DIV as i64 => {
-                // Divide
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Divide: stack top / AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in DIV".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
+                
                 if self.ax == 0 {
                     return Err(CompilerError::VMError("Division by zero".to_string()));
                 }
-                self.ax = a / self.ax;
+                
+                self.ax = value / self.ax;
                 self.pc += 1;
             },
             i if i == Opcode::MOD as i64 => {
-                // Modulo
-                if self.sp + 1 >= self.stack.len() {
-                    return Err(CompilerError::VMError("Stack underflow".to_string()));
+                // Modulo: stack top % AX -> AX
+                if self.sp >= self.stack.len() {
+                    return Err(CompilerError::VMError("Stack underflow in MOD".to_string()));
                 }
-                let a = self.stack[self.sp];
+                
+                let value = self.stack[self.sp];
                 self.sp += 1;
+                
                 if self.ax == 0 {
-                    return Err(CompilerError::VMError("Division by zero".to_string()));
+                    return Err(CompilerError::VMError("Division by zero in modulo".to_string()));
                 }
-                self.ax = a % self.ax;
+                
+                self.ax = value % self.ax;
+                self.pc += 1;
+            },
+            i if i == Opcode::PRTF as i64 => {
+                // Simple printf implementation - not fully compatible with C
+                println!("PRTF: {}", self.ax);
                 self.pc += 1;
             },
             _ => {
@@ -494,7 +620,7 @@ impl VirtualMachine {
         Ok(())
     }
     
-    /// Load an integer from memory
+    #[allow(dead_code)]
     fn load_int(&self, addr: usize) -> Result<i64, CompilerError> {
         // Check if address is in data section
         if addr + std::mem::size_of::<i64>() <= self.data.len() {
@@ -512,7 +638,7 @@ impl VirtualMachine {
         ))
     }
     
-    /// Load a character from memory
+    #[allow(dead_code)]
     fn load_char(&self, addr: usize) -> Result<i64, CompilerError> {
         // Check if address is in data section
         if addr < self.data.len() {
@@ -524,7 +650,7 @@ impl VirtualMachine {
         ))
     }
     
-    /// Store an integer to memory
+    #[allow(dead_code)]
     fn store_int(&mut self, addr: usize, value: i64) -> Result<(), CompilerError> {
         // Check if address is in data section
         if addr + std::mem::size_of::<i64>() <= self.data.len() {
@@ -540,7 +666,7 @@ impl VirtualMachine {
         }
     }
     
-    /// Store a character to memory
+    #[allow(dead_code)]
     fn store_char(&mut self, addr: usize, value: u8) -> Result<(), CompilerError> {
         // Check if address is in data section
         if addr < self.data.len() {
@@ -553,7 +679,7 @@ impl VirtualMachine {
         }
     }
     
-    /// Read a null-terminated string from memory
+    #[allow(dead_code)]
     fn read_string(&self, addr: usize) -> Result<Vec<u8>, CompilerError> {
         let mut result = Vec::new();
         let mut current_addr = addr;

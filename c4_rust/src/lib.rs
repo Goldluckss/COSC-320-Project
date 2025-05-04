@@ -20,4 +20,4 @@ pub mod vm;
 
 // Re-export commonly used types
 pub use parser::Parser;
-pub use types::{TokenType, Type};
+pub use types::{TokenType, Type, Opcode};

@@ -148,6 +148,7 @@ impl SymbolTable {
     
     /// Enter a new scope
     pub fn enter_scope(&mut self) {
+        // Save the current symbol count at this scope boundary
         self.scopes.push(self.symbols.len());
     }
     
@@ -158,21 +159,24 @@ impl SymbolTable {
             return;
         }
         
-        // Remove all symbols in the current scope
+        // Get the start index of the current scope
         let start_index = self.scopes.pop().unwrap();
         
         // Remove scope entries from name map
         let scope_level = self.scopes.len();
+        
+        // First collect keys to remove (can't modify while iterating)
         let keys_to_remove: Vec<String> = self.name_map.keys()
             .filter(|k| k.starts_with(&format!("{}:", scope_level)))
             .cloned()
             .collect();
-            
+        
+        // Then remove them
         for key in keys_to_remove {
             self.name_map.remove(&key);
         }
         
-        // Truncate symbols
+        // Keep only symbols from outer scopes
         self.symbols.truncate(start_index);
     }
     
@@ -214,6 +218,15 @@ impl SymbolTable {
     /// The number of scopes
     pub fn get_scope_count(&self) -> usize {
         self.scopes.len()
+    }
+    
+    /// Get current scope level
+    ///
+    /// # Returns
+    ///
+    /// The current scope level (0 for global)
+    pub fn current_scope_level(&self) -> usize {
+        self.scopes.len() - 1
     }
 }
 
