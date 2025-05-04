@@ -13,10 +13,10 @@ pub enum TokenType {
     Return,
     Sizeof,
     While,
+    Void,   // Added to match C4.c
     
     // Variable/function classes
     Num,
-    Str,  // Added for string literals
     Fun,
     Sys,
     Glo,
@@ -48,11 +48,7 @@ pub enum TokenType {
     Dec,     // --
     Brak,    // [
     
-    // Additional tokens
-    Not,     // !
-    BitNot,  // ~
-    
-    // Delimiters
+    // Single character tokens
     Semicolon,  // ;
     LBrace,     // {
     RBrace,     // }
@@ -61,6 +57,7 @@ pub enum TokenType {
     RBracket,   // ]
     Comma,      // ,
     Colon,      // :
+    Tilde,      // ~
 }
 
 impl TokenType {
@@ -96,7 +93,8 @@ impl PartialOrd for TokenType {
 
 /// VM operation codes
 /// 
-/// These are the instructions understood by the VM
+/// These are the instructions understood by the VM,
+/// directly mapping to C4's opcodes
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum Opcode {
     LEA,    // Load effective address
@@ -131,6 +129,7 @@ pub enum Opcode {
     MUL,    // Multiply
     DIV,    // Divide
     MOD,    // Modulo
+    NEG,    // Negate
     
     // System calls
     OPEN,   // Open file
@@ -158,6 +157,9 @@ impl Opcode {
             Opcode::LE => "LE", Opcode::GE => "GE", Opcode::SHL => "SHL", 
             Opcode::SHR => "SHR", Opcode::ADD => "ADD", Opcode::SUB => "SUB", 
             Opcode::MUL => "MUL", Opcode::DIV => "DIV", Opcode::MOD => "MOD", 
+            Opcode::NEG => "NEG", Opcode::OPEN => "OPEN", Opcode::READ => "READ", 
+            Opcode::CLOS => "CLOS", Opcode::PRTF => "PRTF", Opcode::MALC => "MALC", 
+            Opcode::FREE => "FREE", Opcode::MSET => "MSET", Opcode::MCMP => "MCMP", 
             Opcode::OPEN => "OPEN", Opcode::READ => "READ", Opcode::CLOS => "CLOS", 
             Opcode::PRTF => "PRTF", Opcode::MALC => "MALC", Opcode::FREE => "FREE", 
             Opcode::MSET => "MSET", Opcode::MCMP => "MCMP", Opcode::EXIT => "EXIT",
@@ -171,7 +173,7 @@ impl Opcode {
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum Type {
     CHAR = 0,   // Character type (8-bit)
-    INT = 1,    // Integer type (64-bit in this implementation)
+    INT = 1,    // Integer type (64-bit)
     PTR = 2,    // Pointer type (starts at 2 and increments for each level of indirection)
 }
 
@@ -198,11 +200,11 @@ impl Type {
         }
     }
     
-    /// Get the size of this type
+    /// Get the size of this type in bytes
     pub fn size(self) -> usize {
         match self {
             Type::CHAR => 1,
-            _ => std::mem::size_of::<i64>(),
+            _ => std::mem::size_of::<i64>(), // Use i64 for INT and PTR
         }
     }
 }

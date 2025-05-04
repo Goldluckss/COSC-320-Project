@@ -8,22 +8,35 @@ use crate::types::{Opcode, TokenType, Type};
 /// The parser transforms tokens from the lexer into bytecode
 /// and manages the symbol table.
 pub struct Parser {
+    /// Lexer for tokenizing source code
     lexer: Lexer,
+
+    /// Generated code segment
     code: Vec<i64>,
+
+    /// Data segment
+    data: Vec<u8>,
+
+    /// Current token
     current_token: Token,
+
+    /// Symbol table
     symbol_table: SymbolTable,
-    data_segment: Vec<u8>,
-    
-    // Current parsing state
+
+    /// Current parsing type
     current_type: Type,
+
+    /// Current identifier name
     current_id_name: Option<String>,
-    _current_value: i64,
-    
-    // Local variable offsets
+
+    /// Current token value
+    current_value: i64,
+
+    /// Local variable offset
     local_offset: i64,
-    
-    // Print source flag
-    _print_source: bool,
+
+    /// Print source flag
+    print_source: bool,
 }
 
 impl Parser {
@@ -32,33 +45,33 @@ impl Parser {
         Parser {
             lexer: Lexer::new(source, print_source),
             code: Vec::new(),
+            data: Vec::new(),
             current_token: Token {
                 token_type: TokenType::Eof,
                 value: None,
                 name: None,
             },
             symbol_table: SymbolTable::new(),
-            data_segment: Vec::new(),
             current_type: Type::INT,
             current_id_name: None,
-            _current_value: 0,
+            current_value: 0,
             local_offset: 0,
-            _print_source: print_source,
+            print_source,
         }
     }
-    
-    /// Initialize parser
+
+    /// Initialize the parser
     pub fn init(&mut self) -> Result<(), CompilerError> {
         // Initialize system functions
         self.init_system_functions();
-        
+
         // Get the first token
         self.next_token()?;
-        
+
         Ok(())
     }
-    
-    /// Initialize system function symbols (printf, malloc, etc.)
+
+    /// Initialize system function symbols
     fn init_system_functions(&mut self) {
         // System functions are represented by opcodes
         self.symbol_table.add("open", TokenType::Sys, Type::INT, Opcode::OPEN as i64);
@@ -70,1232 +83,393 @@ impl Parser {
         self.symbol_table.add("memset", TokenType::Sys, Type::INT, Opcode::MSET as i64);
         self.symbol_table.add("memcmp", TokenType::Sys, Type::INT, Opcode::MCMP as i64);
         self.symbol_table.add("exit", TokenType::Sys, Type::INT, Opcode::EXIT as i64);
+        self.symbol_table.add("void", TokenType::Void, Type::INT, 0);
     }
-    
-    /// Parse the source code
-    pub fn parse(&mut self) -> Result<(), CompilerError> {
-        // Parse global declarations
-        self.parse_declarations()?;
-        
-        // Check for main function
-        if self.get_main_function().is_none() {
-            return Err(CompilerError::ParserError("main() not defined".to_string()));
-        }
-        
-        Ok(())
-    }
-    
-    /// Get the generated code
-    pub fn get_code(&self) -> &[i64] {
-        &self.code
-    }
-    
-    /// Get the data segment
-    pub fn get_data(&self) -> &[u8] {
-        &self.data_segment
-    }
-    
-    /// Get the main function address
-    pub fn get_main_function(&self) -> Option<usize> {
-        self.symbol_table.get_main().map(|sym| sym.value as usize)
-    }
-    
-    /// Get the next token from lexer
+
+    /// Get the next token from the lexer
     fn next_token(&mut self) -> Result<(), CompilerError> {
         self.current_token = self.lexer.next_token()?;
+
+        // Update current identifier name and value
+        match &self.current_token.token_type {
+            TokenType::Id => {
+                self.current_id_name = self.current_token.name.clone();
+            },
+            TokenType::Num => {
+                self.current_value = self.current_token.value.unwrap_or(0);
+            },
+            _ => {}
+        }
+
         Ok(())
     }
-    
-    /// Check if current token matches expected, then advance
+
+    /// Emit a value to the code segment
+    fn emit(&mut self, val: i64) -> usize {
+        let pos = self.code.len();
+        self.code.push(val);
+        pos
+    }
+
+    /// Check if current token matches the expected token, then advance
     fn match_token(&mut self, expected: TokenType) -> Result<(), CompilerError> {
         if self.current_token.token_type == expected {
             self.next_token()?;
             Ok(())
         } else {
-            Err(CompilerError::ParserError(
-                format!("Expected {:?}, got {:?}", expected, self.current_token.token_type)
-            ))
+            Err(CompilerError::ParserError {
+                message: format!("Expected {:?}, got {:?} at line {}", 
+                    expected, 
+                    self.current_token.token_type,
+                    self.lexer.line()),
+                location: None,
+                source_line: None,
+                suggestion: None,
+            })
         }
     }
-    
-    /// Emit bytecode for an operation
-    fn emit(&mut self, code: i64) -> usize {
-        let pos = self.code.len();
-        self.code.push(code);
-        pos
+
+    /// Parse the C source code
+    pub fn parse(&mut self) -> Result<(), CompilerError> {
+        // Parse global declarations until end of file
+        self.parse_declarations()?;
+
+        // Look for main function
+        if self.get_main_function().is_none() {
+            return Err(CompilerError::ParserError {
+                message: "main() not defined".to_string(),
+                location: None,
+                source_line: None,
+                suggestion: None,
+            });
+        }
+
+        Ok(())
     }
-    
-    /// Parse declarations (variables and functions)
+
+    /// Parse global declarations
     fn parse_declarations(&mut self) -> Result<(), CompilerError> {
         while self.current_token.token_type != TokenType::Eof {
             // Parse type
             self.parse_type()?;
-            
-            // Parse variables or functions
-            while self.current_token.token_type != TokenType::Semicolon &&
-                  self.current_token.token_type != TokenType::Eof {
+            self.current_type = Type::INT; // Default to INT for now
+
+            // Parse identifier
+            if self.current_token.token_type != TokenType::Id {
+                return Err(CompilerError::ParserError {
+                    message: format!("Expected identifier, got {:?} at line {}", 
+                        self.current_token.token_type,
+                        self.lexer.line()),
+                    location: None,
+                    source_line: None,
+                    suggestion: None,
+                });
+            }
+
+            let id_name = self.current_token.name.as_ref().unwrap().clone();
+            self.next_token()?;
+
+            // Check for function declaration
+            if self.current_token.token_type == TokenType::LParen {
+                // Function declaration
+                self.next_token()?; // Skip '('
                 
-                // Parse identifier
-                if self.current_token.token_type != TokenType::Id {
-                    return Err(CompilerError::ParserError(
-                        format!("Expected identifier, got {:?}", self.current_token.token_type)
-                    ));
-                }
-                
-                // Save identifier name
-                self.current_id_name = self.current_token.name.clone();
-                self.next_token()?;
-                
-                // Check for function or variable
-                if self.current_token.token_type == TokenType::LParen {
-                    self.parse_function()?;
-                } else {
-                    self.parse_global_variable()?;
+                // Parse parameters
+                let mut _param_count = 0;
+                if self.current_token.token_type != TokenType::RParen {
+                    // First parameter
+                    self.parse_type()?;
+                    if self.current_token.token_type != TokenType::Id {
+                        return Err(CompilerError::ParserError {
+                            message: format!("Expected parameter name, got {:?} at line {}", 
+                                self.current_token.token_type,
+                                self.lexer.line()),
+                            location: None,
+                            source_line: None,
+                            suggestion: None,
+                        });
+                    }
+                    let param_name = self.current_token.name.as_ref().unwrap().clone();
+                    self.next_token()?;
                     
-                    // Check for multiple variables
-                    if self.current_token.token_type == TokenType::Comma {
+                    // Add parameter to symbol table
+                    self.symbol_table.add(&param_name, TokenType::Id, self.current_type, self.local_offset);
+                    self.local_offset += 8; // Each parameter takes 8 bytes
+                    _param_count += 1;
+
+                    // More parameters
+                    while self.current_token.token_type == TokenType::Comma {
+                        self.next_token()?; // Skip ','
+                        self.parse_type()?;
+                        if self.current_token.token_type != TokenType::Id {
+                            return Err(CompilerError::ParserError {
+                                message: format!("Expected parameter name, got {:?} at line {}", 
+                                    self.current_token.token_type,
+                                    self.lexer.line()),
+                                location: None,
+                                source_line: None,
+                                suggestion: None,
+                            });
+                        }
+                        let param_name = self.current_token.name.as_ref().unwrap().clone();
                         self.next_token()?;
-                        continue;
+                        
+                        // Add parameter to symbol table
+                        self.symbol_table.add(&param_name, TokenType::Id, self.current_type, self.local_offset);
+                        self.local_offset += 8; // Each parameter takes 8 bytes
+                        _param_count += 1;
                     }
                 }
+
+                self.match_token(TokenType::RParen)?;
+
+                // Add function to symbol table
+                let func_pos = self.emit(Opcode::JMP as i64);
+                self.emit(0); // Placeholder for function address
+                self.symbol_table.add(&id_name, TokenType::Fun, self.current_type, func_pos as i64);
+
+                // Parse function body
+                self.match_token(TokenType::LBrace)?;
                 
-                // Check for semicolon after declarations
-                if self.current_token.token_type == TokenType::Semicolon {
-                    self.next_token()?;
-                    break;
+                // Reset local offset for function body
+                self.local_offset = 0;
+                
+                // Parse statements
+                while self.current_token.token_type != TokenType::RBrace {
+                    self.parse_statement()?;
                 }
                 
-                // Check for end of declarations
-                if self.current_token.token_type == TokenType::RBrace {
-                    break;
+                self.match_token(TokenType::RBrace)?;
+
+                // Update function address
+                self.code[func_pos + 1] = self.code.len() as i64;
+            } else {
+                // Variable declaration
+                self.symbol_table.add(&id_name, TokenType::Id, self.current_type, self.local_offset);
+                self.local_offset += 8; // Each variable takes 8 bytes
+
+                // Check for initialization
+                if self.current_token.token_type == TokenType::Assign {
+                    self.next_token()?; // Skip '='
+                    self.parse_expression()?;
                 }
             }
+
+            // Skip semicolon
+            self.match_token(TokenType::Semicolon)?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Parse a type (int, char, etc.)
     fn parse_type(&mut self) -> Result<(), CompilerError> {
-        // Set default type
+        // Default to int
         self.current_type = Type::INT;
-        
+
+        // Parse type keyword
         match self.current_token.token_type {
             TokenType::Int => {
-                self.next_token()?;
+                self.next_token(); // Skip 'int'
             },
             TokenType::Char => {
                 self.current_type = Type::CHAR;
-                self.next_token()?;
+                self.next_token(); // Skip 'char'
             },
             TokenType::Enum => {
                 self.parse_enum()?;
+            },
+            TokenType::Void => {
+                // Skip 'void', but keep Type::INT
+                self.next_token();
             },
             _ => {
                 // Default to int if no type specified
             }
         }
-        
-        // Parse pointer types
+
+        // Parse pointers
         while self.current_token.token_type == TokenType::Mul {
             self.current_type = self.current_type.to_ptr();
-            self.next_token()?;
+            self.next_token(); // Skip '*'
         }
-        
-        Ok(())
-    }
-    
-    /// Parse an enum declaration
-    fn parse_enum(&mut self) -> Result<(), CompilerError> {
-        // Skip 'enum' token
-        self.next_token()?;
-        
-        // Optional enum identifier
-        if self.current_token.token_type == TokenType::Id {
-            self.next_token()?;
-        }
-        
-        // Check for enum body
-        if self.current_token.token_type != TokenType::LBrace {
-            return Err(CompilerError::ParserError(
-                format!("Expected {{ after enum, got {:?}", self.current_token.token_type)
-            ));
-        }
-        self.next_token()?;
-        
-        // Parse enum values
-        let mut value = 0;
-        while self.current_token.token_type != TokenType::RBrace {
-            // Check for identifier
-            if self.current_token.token_type != TokenType::Id {
-                return Err(CompilerError::ParserError(
-                    format!("Expected identifier in enum, got {:?}", self.current_token.token_type)
-                ));
-            }
-            
-            // Get identifier name
-            let id_name = self.current_token.name.clone().unwrap();
-            self.next_token()?;
-            
-            // Check for value assignment
-            if self.current_token.token_type == TokenType::Assign {
-                self.next_token()?;
-                
-                if self.current_token.token_type != TokenType::Num {
-                    return Err(CompilerError::ParserError(
-                        format!("Expected number after =, got {:?}", self.current_token.token_type)
-                    ));
-                }
-                
-                value = self.current_token.value.unwrap();
-                self.next_token()?;
-            }
-            
-            // Add enum value to symbol table
-            self.symbol_table.add(&id_name, TokenType::Num, Type::INT, value);
-            
-            // Increment value for next enum
-            value += 1;
-            
-            // Check for comma
-            if self.current_token.token_type == TokenType::Comma {
-                self.next_token()?;
-            }
-        }
-        
-        // Skip closing brace
-        self.next_token()?;
-        
-        Ok(())
-    }
-    
-    /// Parse a function declaration
-    fn parse_function(&mut self) -> Result<(), CompilerError> {
-        // Get function name
-        let func_name = self.current_id_name.clone().unwrap();
-        
-        // Add function to symbol table
-        let func_addr = self.code.len() as i64;
-        self.symbol_table.add(&func_name, TokenType::Fun, self.current_type, func_addr);
-        
-        // Parse parameters
-        self.match_token(TokenType::LParen)?;
-        
-        // Enter function scope
-        self.symbol_table.enter_scope();
-        self.local_offset = 0;
-        
-        // Parse parameter list
-        if self.current_token.token_type != TokenType::RParen {
-            self.parse_parameters()?;
-        }
-        
-        self.match_token(TokenType::RParen)?;
-        
-        // Function body
-        self.match_token(TokenType::LBrace)?;
-        
-        // Reserve space for function prologue
-        let prologue_pos = self.emit(Opcode::ENT as i64);
-        self.emit(0); // Placeholder for local variable count
-        
-        // Parse local variable declarations
-        while self.current_token.token_type == TokenType::Int || 
-              self.current_token.token_type == TokenType::Char {
-            self.parse_local_variables()?;
-        }
-        
-        // Update local variable count
-        self.code[prologue_pos + 1] = self.local_offset;
-        
-        // Parse statements
-        while self.current_token.token_type != TokenType::RBrace {
-            self.parse_statement()?;
-        }
-        
-        // Function epilogue
-        self.emit(Opcode::LEV as i64);
-        
-        // Exit function scope
-        self.symbol_table.exit_scope();
-        
-        // Skip closing brace
-        self.next_token()?;
-        
-        Ok(())
-    }
-    
-    /// Parse function parameters
-    fn parse_parameters(&mut self) -> Result<(), CompilerError> {
-        loop {
-            // Parse parameter type
-            let param_type = if self.current_token.token_type == TokenType::Int {
-                self.next_token()?;
-                Type::INT
-            } else if self.current_token.token_type == TokenType::Char {
-                self.next_token()?;
-                Type::CHAR
-            } else {
-                return Err(CompilerError::ParserError(
-                    format!("Expected type in parameter list, got {:?}", self.current_token.token_type)
-                ));
-            };
-            
-            // Parse pointers
-            let mut param_type = param_type;
-            while self.current_token.token_type == TokenType::Mul {
-                param_type = param_type.to_ptr();
-                self.next_token()?;
-            }
-            
-            // Parse parameter name
-            if self.current_token.token_type != TokenType::Id {
-                return Err(CompilerError::ParserError(
-                    format!("Expected identifier in parameter list, got {:?}", self.current_token.token_type)
-                ));
-            }
-            
-            // Get parameter name
-            let param_name = self.current_token.name.clone().unwrap();
-            self.next_token()?;
-            
-            // Add parameter to symbol table
-            // Parameters are stored in reverse order on stack, with bp pointing to the old bp
-            // bp+0: old bp, bp+1: return address, bp+2: first param, ...
-            self.local_offset += 1;
-            self.symbol_table.add(&param_name, TokenType::Loc, param_type, self.local_offset);
-            
-            // Check for more parameters
-            if self.current_token.token_type != TokenType::Comma {
-                break;
-            }
-            
-            self.next_token()?;
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse global variable declaration
-    fn parse_global_variable(&mut self) -> Result<(), CompilerError> {
-        // Get variable name
-        let var_name = self.current_id_name.clone().unwrap();
-        
-        // Check for array
-        let mut size = 1;
-        if self.current_token.token_type == TokenType::Brak {
-            self.next_token()?;
-            
-            if self.current_token.token_type != TokenType::Num {
-                return Err(CompilerError::ParserError(
-                    format!("Expected array size, got {:?}", self.current_token.token_type)
-                ));
-            }
-            
-            size = self.current_token.value.unwrap() as usize;
-            self.next_token()?;
-            
-            self.match_token(TokenType::RBracket)?;
-        }
-        
-        // Calculate data size
-        let data_size = size * self.current_type.size();
-        
-        // Add global variable to symbol table
-        let data_addr = self.data_segment.len() as i64;
-        self.symbol_table.add(&var_name, TokenType::Glo, self.current_type, data_addr);
-        
-        // Extend data segment
-        self.data_segment.resize(self.data_segment.len() + data_size, 0);
-        
-        // Check for initialization
-        if self.current_token.token_type == TokenType::Assign {
-            self.next_token()?;
-            
-            // Parse initializer
-            if self.current_token.token_type == TokenType::Num {
-                // Initialize with number
-                let value = self.current_token.value.unwrap();
-                
-                // Store value in data segment
-                if self.current_type == Type::CHAR {
-                    self.data_segment[data_addr as usize] = value as u8;
-                } else {
-                    // Store as little-endian integer
-                    for i in 0..std::mem::size_of::<i64>() {
-                        if (data_addr as usize) + i < self.data_segment.len() {
-                            self.data_segment[data_addr as usize + i] = ((value >> (i * 8)) & 0xFF) as u8;
-                        }
-                    }
-                }
-                
-                self.next_token()?;
-            } else if self.current_token.token_type == TokenType::Str {
-                // Initialize with string
-                let string_content = self.current_token.name.clone().unwrap();
-                
-                // Copy string to data segment
-                for (i, &byte) in string_content.as_bytes().iter().enumerate() {
-                    if (data_addr as usize) + i < self.data_segment.len() {
-                        self.data_segment[data_addr as usize + i] = byte;
-                    }
-                }
-                
-                // Add null terminator
-                if (data_addr as usize) + string_content.len() < self.data_segment.len() {
-                    self.data_segment[data_addr as usize + string_content.len()] = 0;
-                }
-                
-                self.next_token()?;
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse local variable declarations
-    fn parse_local_variables(&mut self) -> Result<(), CompilerError> {
-        // Parse type
-        self.parse_type()?;
-        
-        // Parse variable list
-        loop {
-            // Parse variable name
-            if self.current_token.token_type != TokenType::Id {
-                return Err(CompilerError::ParserError(
-                    format!("Expected identifier, got {:?}", self.current_token.token_type)
-                ));
-            }
-            
-            // Get variable name
-            let var_name = self.current_token.name.clone().unwrap();
-            self.next_token()?;
-            
-            // Check for array
-            let mut size = 1;
-            if self.current_token.token_type == TokenType::Brak {
-                self.next_token()?;
-                
-                if self.current_token.token_type != TokenType::Num {
-                    return Err(CompilerError::ParserError(
-                        format!("Expected array size, got {:?}", self.current_token.token_type)
-                    ));
-                }
-                
-                size = self.current_token.value.unwrap() as usize;
-                self.next_token()?;
-                
-                self.match_token(TokenType::RBracket)?;
-            }
-            
-            // Add local variable to symbol table, with negative offset
-            self.local_offset += size as i64;
-            self.symbol_table.add(&var_name, TokenType::Loc, self.current_type, -self.local_offset);
-            
-            // Check for initialization
-            if self.current_token.token_type == TokenType::Assign {
-                self.next_token()?;
-                
-                // Parse expression for initialization
-                self.parse_expression()?;
-                
-                // Generate code to store value
-                self.emit(Opcode::LEA as i64);
-                self.emit(-self.local_offset);
-                self.emit(Opcode::SI as i64);
-            }
-            
-            // Check for more variables
-            if self.current_token.token_type != TokenType::Comma {
-                break;
-            }
-            
-            self.next_token()?;
-        }
-        
-        // Skip semicolon
-        self.match_token(TokenType::Semicolon)?;
-        
-        Ok(())
-    }
-    
-    /// Parse a statement
-    fn parse_statement(&mut self) -> Result<(), CompilerError> {
-        match self.current_token.token_type {
-            TokenType::If => self.parse_if_statement()?,
-            TokenType::While => self.parse_while_statement()?,
-            TokenType::Return => self.parse_return_statement()?,
-            TokenType::LBrace => self.parse_block()?,
-            TokenType::Semicolon => {
-                // Empty statement
-                self.next_token()?;
-            },
-            _ => {
-                // Expression statement
-                self.parse_expression_statement()?;
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse an if statement
-    fn parse_if_statement(&mut self) -> Result<(), CompilerError> {
-        // Skip 'if' token
-        self.next_token()?;
-        
-        // Parse condition
-        if self.current_token.token_type != TokenType::LParen {
-            return Err(CompilerError::ParserError(
-                format!("Expected (, got {:?}", self.current_token.token_type)
-            ));
-        }
-        self.next_token()?;
-        
-        self.parse_expression()?;
-        
-        if self.current_token.token_type != TokenType::RParen {
-            return Err(CompilerError::ParserError(
-                format!("Expected ), got {:?}", self.current_token.token_type)
-            ));
-        }
-        self.next_token()?;
-        
-        // Generate code for condition
-        let _jump_false_pos = self.emit(Opcode::BZ as i64);
-        let jump_false_placeholder = self.emit(0);
-        
-        // Parse if body
-        self.parse_statement()?;
-        
-        // Check for else
-        if self.current_token.token_type == TokenType::Else {
-            self.next_token()?;
-            
-            // Generate jump for if body
-            let _jump_end_pos = self.emit(Opcode::JMP as i64);
-            let jump_end_placeholder = self.emit(0);
-            
-            // Update false jump position
-            self.code[jump_false_placeholder] = self.code.len() as i64;
-            
-            // Parse else body
-            self.parse_statement()?;
-            
-            // Update end jump position
-            self.code[jump_end_placeholder] = self.code.len() as i64;
-        } else {
-            // No else, just update the false jump
-            self.code[jump_false_placeholder] = self.code.len() as i64;
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse a while statement
-    fn parse_while_statement(&mut self) -> Result<(), CompilerError> {
-        // Skip 'while' token
-        self.next_token()?;
-        
-        // Remember loop start position
-        let loop_start = self.code.len() as i64;
-        
-        // Parse condition
-        if self.current_token.token_type != TokenType::LParen {
-            return Err(CompilerError::ParserError(
-                format!("Expected (, got {:?}", self.current_token.token_type)
-            ));
-        }
-        self.next_token()?;
-        
-        self.parse_expression()?;
-        
-        if self.current_token.token_type != TokenType::RParen {
-            return Err(CompilerError::ParserError(
-                format!("Expected ), got {:?}", self.current_token.token_type)
-            ));
-        }
-        self.next_token()?;
-        
-        // Generate code for condition
-        let _jump_false_pos = self.emit(Opcode::BZ as i64);
-        let jump_false_placeholder = self.emit(0);
-        
-        // Parse loop body
-        self.parse_statement()?;
-        
-        // Jump back to loop start
-        self.emit(Opcode::JMP as i64);
-        self.emit(loop_start);
-        
-        // Update false jump position
-        self.code[jump_false_placeholder] = self.code.len() as i64;
-        
-        Ok(())
-    }
-    
-    /// Parse a return statement
-    fn parse_return_statement(&mut self) -> Result<(), CompilerError> {
-        // Skip 'return' token
-        self.next_token()?;
-        
-        // Check for expression
-        if self.current_token.token_type != TokenType::Semicolon {
-            self.parse_expression()?;
-        } else {
-            // No expression, return 0
-            self.emit(Opcode::IMM as i64);
-            self.emit(0);
-        }
-        
-        // Generate return
-        self.emit(Opcode::LEV as i64);
-        
-        // Skip semicolon
-        if self.current_token.token_type == TokenType::Semicolon {
-            self.next_token()?;
-        } else {
-            return Err(CompilerError::ParserError(
-                format!("Expected semicolon, got {:?}", self.current_token.token_type)
-            ));
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse a block of statements
-    fn parse_block(&mut self) -> Result<(), CompilerError> {
-        // Skip opening brace
-        self.match_token(TokenType::LBrace)?;
-        
-        // Enter a new scope
-        self.symbol_table.enter_scope();
-        
-        // Parse statements
-        while self.current_token.token_type != TokenType::RBrace && 
-              self.current_token.token_type != TokenType::Eof {
-            self.parse_statement()?;
-        }
-        
-        // Exit scope
-        self.symbol_table.exit_scope();
-        
-        // Skip closing brace
-        self.match_token(TokenType::RBrace)?;
-        
+
         Ok(())
     }
 
-    /// Get a reference to the symbol table
-    pub fn get_symbol_table(&self) -> &SymbolTable {
-        &self.symbol_table
-    }
-    
-    /// Parse an expression statement
-    fn parse_expression_statement(&mut self) -> Result<(), CompilerError> {
-        // Parse expression
-        self.parse_expression()?;
-        
-        // Discard the result if it's not a return value
-        if self.current_token.token_type != TokenType::Return {
-            self.emit(Opcode::ADJ as i64);
-            self.emit(1); // Pop one value
-        }
-        
-        // Skip semicolon
-        if self.current_token.token_type == TokenType::Semicolon {
-            self.next_token()?;
-        } else {
-            return Err(CompilerError::ParserError(
-                format!("Expected semicolon, got {:?}", self.current_token.token_type)
-            ));
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse an expression
-    fn parse_expression(&mut self) -> Result<(), CompilerError> {
-        self.parse_assignment()
-    }
-    
-    /// Parse an assignment expression
-    fn parse_assignment(&mut self) -> Result<(), CompilerError> {
-        // Parse the left side of the assignment
+    /// Parse an enum declaration
+    fn parse_enum(&mut self) -> Result<(), CompilerError> {
+        self.next_token(); // Skip 'enum'
+
+        // Optional enum identifier
         if self.current_token.token_type == TokenType::Id {
-            // Check if this is a variable
-            let id_name = self.current_token.name.clone().unwrap();
-            
-            if let Some(symbol) = self.symbol_table.get(&id_name) {
-                self.next_token()?;
-                
-                // Check for assignment
+            self.next_token(); // Skip identifier
+        }
+
+        // Enum body
+        if self.current_token.token_type == TokenType::LBrace {
+            self.next_token(); // Skip '{'
+
+            let mut value = 0;
+
+            // Parse enum members
+            while self.current_token.token_type != TokenType::RBrace {
+                // Member name
+                if self.current_token.token_type != TokenType::Id {
+                    return Err(CompilerError::ParserError {
+                        message: format!("Expected identifier in enum declaration at line {}", 
+                            self.lexer.line()),
+                        location: None,
+                        source_line: None,
+                        suggestion: None,
+                    });
+                }
+
+                let enum_name = self.current_token.name.as_ref().unwrap().clone();
+                self.next_token(); // Skip identifier
+
+                // Check for explicit value
                 if self.current_token.token_type == TokenType::Assign {
-                    self.next_token()?;
-                    
-                    // Generate address for the variable
-                    match symbol.class {
-                        TokenType::Glo => {
-                            self.emit(Opcode::IMM as i64);
-                            self.emit(symbol.value);
-                        },
-                        TokenType::Loc => {
-                            self.emit(Opcode::LEA as i64);
-                            self.emit(symbol.value);
-                        },
-                        _ => {
-                            return Err(CompilerError::ParserError(
-                                format!("Cannot assign to {}", id_name)
-                            ));
-                        }
+                    self.next_token(); // Skip '='
+
+                    if self.current_token.token_type != TokenType::Num {
+                        return Err(CompilerError::ParserError {
+                            message: format!("Expected numeric value after = in enum at line {}", 
+                                self.lexer.line()),
+                            location: None,
+                            source_line: None,
+                            suggestion: None,
+                        });
                     }
-                    
-                    // Push address to stack
-                    self.emit(Opcode::PSH as i64);
-                    
-                    // Parse right side of assignment
-                    self.parse_assignment()?;
-                    
-                    // Generate store instruction
-                    if symbol.typ == Type::CHAR {
-                        self.emit(Opcode::SC as i64);
-                    } else {
-                        self.emit(Opcode::SI as i64);
-                    }
-                    
-                    return Ok(());
+
+                    value = self.current_value;
+                    self.next_token(); // Skip number
                 }
-                
-                // Not an assignment, backtrack
-                self.current_token = Token {
-                    token_type: TokenType::Id,
-                    name: Some(id_name),
-                    value: None,
-                };
+
+                // Add enum member to symbol table
+                self.symbol_table.add(&enum_name, TokenType::Num, Type::INT, value);
+
+                // Increment value for next member
+                value += 1;
+
+                // Check for comma
+                if self.current_token.token_type == TokenType::Comma {
+                    self.next_token(); // Skip ','
+                } else {
+                    break;
+                }
             }
+
+            self.match_token(TokenType::RBrace)?;
         }
-        
-        // Not an assignment, parse logical OR expression
-        self.parse_logical_or()
-    }
-    
-    /// Parse logical OR expression (||)
-    fn parse_logical_or(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_logical_and()?;
-        
-        // Parse || operators
-        while self.current_token.token_type == TokenType::Lor {
-            self.next_token()?;
-            
-            // Generate short-circuit evaluation
-            let _jump_true_pos = self.emit(Opcode::BNZ as i64);
-            let jump_true_placeholder = self.emit(0);
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_logical_and()?;
-            
-            // Perform OR operation
-            self.emit(Opcode::OR as i64);
-            
-            // Update jump position
-            self.code[jump_true_placeholder] = self.code.len() as i64;
-        }
-        
+
         Ok(())
     }
-    
-    /// Parse logical AND expression (&&)
-    fn parse_logical_and(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_bitwise_or()?;
-        
-        // Parse && operators
-        while self.current_token.token_type == TokenType::Lan {
-            self.next_token()?;
-            
-            // Generate short-circuit evaluation
-            let _jump_false_pos = self.emit(Opcode::BZ as i64);
-            let jump_false_placeholder = self.emit(0);
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_bitwise_or()?;
-            
-            // Perform AND operation
-            self.emit(Opcode::AND as i64);
-            
-            // Update jump position
-            self.code[jump_false_placeholder] = self.code.len() as i64;
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse bitwise OR expression (|)
-    fn parse_bitwise_or(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_bitwise_xor()?;
-        
-        // Parse | operators
-        while self.current_token.token_type == TokenType::Or {
-            self.next_token()?;
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_bitwise_xor()?;
-            
-            // Perform bitwise OR
-            self.emit(Opcode::OR as i64);
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse bitwise XOR expression (^)
-    fn parse_bitwise_xor(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_bitwise_and()?;
-        
-        // Parse ^ operators
-        while self.current_token.token_type == TokenType::Xor {
-            self.next_token()?;
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_bitwise_and()?;
-            
-            // Perform bitwise XOR
-            self.emit(Opcode::XOR as i64);
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse bitwise AND expression (&)
-    fn parse_bitwise_and(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_equality()?;
-        
-        // Parse & operators
-        while self.current_token.token_type == TokenType::And {
-            self.next_token()?;
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_equality()?;
-            
-            // Perform bitwise AND
-            self.emit(Opcode::AND as i64);
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse equality expressions (==, !=)
-    fn parse_equality(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_comparison()?;
-        
-        // Parse == and != operators
-        while self.current_token.token_type == TokenType::Eq || 
-              self.current_token.token_type == TokenType::Ne {
-            
-            let op = self.current_token.token_type;
-            self.next_token()?;
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_comparison()?;
-            
-            // Perform comparison
-            match op {
-                TokenType::Eq => { self.emit(Opcode::EQ as i64); },
-                TokenType::Ne => { self.emit(Opcode::NE as i64); },
-                _ => unreachable!(),
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse comparison expressions (<, >, <=, >=)
-    fn parse_comparison(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_shift()?;
-        
-        // Parse comparison operators
-        while self.current_token.token_type == TokenType::Lt || 
-              self.current_token.token_type == TokenType::Gt ||
-              self.current_token.token_type == TokenType::Le ||
-              self.current_token.token_type == TokenType::Ge {
-            
-            let op = self.current_token.token_type;
-            self.next_token()?;
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_shift()?;
-            
-            // Perform comparison
-            match op {
-                TokenType::Lt => { self.emit(Opcode::LT as i64); },
-                TokenType::Gt => { self.emit(Opcode::GT as i64); },
-                TokenType::Le => { self.emit(Opcode::LE as i64); },
-                TokenType::Ge => { self.emit(Opcode::GE as i64); },
-                _ => unreachable!(),
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse shift expressions (<<, >>)
-    fn parse_shift(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_addition()?;
-        
-        // Parse << and >> operators
-        while self.current_token.token_type == TokenType::Shl || 
-              self.current_token.token_type == TokenType::Shr {
-            
-            let op = self.current_token.token_type;
-            self.next_token()?;
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_addition()?;
-            
-            // Perform shift
-            match op {
-                TokenType::Shl => { self.emit(Opcode::SHL as i64); },
-                TokenType::Shr => { self.emit(Opcode::SHR as i64); },
-                _ => unreachable!(),
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse addition and subtraction
-    fn parse_addition(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_multiplication()?;
-        
-        // Parse + and - operators
-        while self.current_token.token_type == TokenType::Add || 
-              self.current_token.token_type == TokenType::Sub {
-            
-            let op = self.current_token.token_type;
-            self.next_token()?;
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_multiplication()?;
-            
-            // Perform addition or subtraction
-            match op {
-                TokenType::Add => { self.emit(Opcode::ADD as i64); },
-                TokenType::Sub => { self.emit(Opcode::SUB as i64); },
-                _ => unreachable!(),
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse multiplication, division, and modulo
-    fn parse_multiplication(&mut self) -> Result<(), CompilerError> {
-        // Parse left operand
-        self.parse_unary()?;
-        
-        // Parse *, /, and % operators
-        while self.current_token.token_type == TokenType::Mul || 
-              self.current_token.token_type == TokenType::Div ||
-              self.current_token.token_type == TokenType::Mod {
-            
-            let op = self.current_token.token_type;
-            self.next_token()?;
-            
-            // Push current result
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse right operand
-            self.parse_unary()?;
-            
-            // Perform operation
-            match op {
-                TokenType::Mul => { self.emit(Opcode::MUL as i64); },
-                TokenType::Div => { self.emit(Opcode::DIV as i64); },
-                TokenType::Mod => { self.emit(Opcode::MOD as i64); },
-                _ => unreachable!(),
-            }
-        }
-        
-        Ok(())
-    }
-    
-    /// Parse unary expressions
-    fn parse_unary(&mut self) -> Result<(), CompilerError> {
+
+    /// Parse a statement
+    fn parse_statement(&mut self) -> Result<(), CompilerError> {
         match self.current_token.token_type {
-            TokenType::Add => {
-                // Unary +
-                self.next_token()?;
-                self.parse_unary()?;
-                // No operation needed, + is a no-op
-            },
-            TokenType::Sub => {
-                // Unary -
-                self.next_token()?;
-                
-                // Special case for numeric literals
-                if self.current_token.token_type == TokenType::Num {
-                    let value = self.current_token.value.unwrap();
-                    self.next_token()?;
-                    
-                    self.emit(Opcode::IMM as i64);
-                    self.emit(-value);
-                } else {
-                    // Load zero and subtract
-                    self.emit(Opcode::IMM as i64);
-                    self.emit(0);
-                    
-                    self.emit(Opcode::PSH as i64);
-                    
-                    self.parse_unary()?;
-                    
-                    self.emit(Opcode::SUB as i64);
+            TokenType::If => {
+                self.next_token()?; // Skip 'if'
+                self.match_token(TokenType::LParen)?;
+                self.parse_expression()?;
+                self.match_token(TokenType::RParen)?;
+
+                // Save position for jump
+                let jmp_pos = self.emit(Opcode::BZ as i64);
+                self.emit(0); // Placeholder for jump address
+
+                // Parse if body
+                self.match_token(TokenType::LBrace)?;
+                while self.current_token.token_type != TokenType::RBrace {
+                    self.parse_statement()?;
                 }
+                self.match_token(TokenType::RBrace)?;
+
+                // Update jump address
+                let new_code_len = self.code.len();
+                self.code[jmp_pos + 1] = new_code_len as i64;
             },
-            TokenType::Not => {
-                // Logical NOT
-                self.next_token()?;
-                self.parse_unary()?;
-                
-                // Compare with zero
-                self.emit(Opcode::PSH as i64);
-                self.emit(Opcode::IMM as i64);
-                self.emit(0);
-                self.emit(Opcode::EQ as i64);
-            },
-            TokenType::BitNot => {
-                // Bitwise NOT
-                self.next_token()?;
-                self.parse_unary()?;
-                
-                // XOR with -1
-                self.emit(Opcode::PSH as i64);
-                self.emit(Opcode::IMM as i64);
-                self.emit(-1);
-                self.emit(Opcode::XOR as i64);
-            },
-            TokenType::Mul => {
-                // Pointer dereference
-                self.next_token()?;
-                self.parse_unary()?;
-                
-                // Load from address
-                self.emit(Opcode::LI as i64);
-            },
-            TokenType::And => {
-                // Address-of operator
-                self.next_token()?;
-                
-                // Must be followed by an identifier
-                if self.current_token.token_type != TokenType::Id {
-                    return Err(CompilerError::ParserError(
-                        format!("Expected identifier after &, got {:?}", self.current_token.token_type)
-                    ));
+            TokenType::While => {
+                let loop_start = self.code.len();
+                self.next_token()?; // Skip 'while'
+                self.match_token(TokenType::LParen)?;
+                self.parse_expression()?;
+                self.match_token(TokenType::RParen)?;
+
+                // Save position for jump
+                let jmp_pos = self.emit(Opcode::BZ as i64);
+                self.emit(0); // Placeholder for jump address
+
+                // Parse while body
+                self.match_token(TokenType::LBrace)?;
+                while self.current_token.token_type != TokenType::RBrace {
+                    self.parse_statement()?;
                 }
-                
-                // Get variable name
-                let var_name = self.current_token.name.clone().unwrap();
-                self.next_token()?;
-                
-                // Look up variable
-                if let Some(symbol) = self.symbol_table.get(&var_name) {
-                    match symbol.class {
-                        TokenType::Glo => {
-                            self.emit(Opcode::IMM as i64);
-                            self.emit(symbol.value);
-                        },
-                        TokenType::Loc => {
-                            self.emit(Opcode::LEA as i64);
-                            self.emit(symbol.value);
-                        },
-                        _ => {
-                            return Err(CompilerError::ParserError(
-                                format!("Cannot take address of {}", var_name)
-                            ));
-                        }
-                    }
-                } else {
-                    return Err(CompilerError::ParserError(
-                        format!("Undefined variable: {}", var_name)
-                    ));
-                }
+                self.match_token(TokenType::RBrace)?;
+
+                // Jump back to condition
+                self.emit(Opcode::JMP as i64);
+                self.emit(loop_start as i64);
+
+                // Update jump address
+                let new_code_len = self.code.len();
+                self.code[jmp_pos + 1] = new_code_len as i64;
             },
-            TokenType::Inc | TokenType::Dec => {
-                // Pre-increment or pre-decrement
-                let op = self.current_token.token_type;
-                self.next_token()?;
-                
-                // Must be followed by an identifier
-                if self.current_token.token_type != TokenType::Id {
-                    return Err(CompilerError::ParserError(
-                        format!("Expected identifier after {:?}, got {:?}", op, self.current_token.token_type)
-                    ));
-                }
-                
-                // Get variable name
-                let var_name = self.current_token.name.clone().unwrap();
-                self.next_token()?;
-                
-                // Look up variable
-                if let Some(symbol) = self.symbol_table.get(&var_name) {
-                    // Get variable address
-                    match symbol.class {
-                        TokenType::Glo => {
-                            self.emit(Opcode::IMM as i64);
-                            self.emit(symbol.value);
-                        },
-                        TokenType::Loc => {
-                            self.emit(Opcode::LEA as i64);
-                            self.emit(symbol.value);
-                        },
-                        _ => {
-                            return Err(CompilerError::ParserError(
-                                format!("Cannot modify {}", var_name)
-                            ));
-                        }
-                    }
-                    
-                    // Duplicate address
-                    self.emit(Opcode::PSH as i64);
-                    
-                    // Load current value
-                    if symbol.typ == Type::CHAR {
-                        self.emit(Opcode::LC as i64);
-                    } else {
-                        self.emit(Opcode::LI as i64);
-                    }
-                    
-                    // Increment or decrement
-                    self.emit(Opcode::PSH as i64);
-                    self.emit(Opcode::IMM as i64);
-                    self.emit(1);
-                    
-                    if op == TokenType::Inc {
-                        self.emit(Opcode::ADD as i64);
-                    } else {
-                        self.emit(Opcode::SUB as i64);
-                    }
-                    
-                    // Store back
-                    if symbol.typ == Type::CHAR {
-                        self.emit(Opcode::SC as i64);
-                    } else {
-                        self.emit(Opcode::SI as i64);
-                    }
-                } else {
-                    return Err(CompilerError::ParserError(
-                        format!("Undefined variable: {}", var_name)
-                    ));
-                }
+            TokenType::Return => {
+                self.next_token()?; // Skip 'return'
+                self.parse_expression()?;
+                self.emit(Opcode::LEV as i64);
+                self.match_token(TokenType::Semicolon)?;
             },
             _ => {
-                // Not a unary operator, parse primary
-                self.parse_primary()?;
+                self.parse_expression()?;
+                self.match_token(TokenType::Semicolon)?;
             }
         }
-        
+
         Ok(())
     }
-    
-    /// Parse primary expressions (literals, variables, function calls, etc.)
-    fn parse_primary(&mut self) -> Result<(), CompilerError> {
+
+    /// Parse a unary expression
+    fn parse_unary_expression(&mut self) -> Result<(), CompilerError> {
         match self.current_token.token_type {
             TokenType::Num => {
-                // Number literal
-                let value = self.current_token.value.unwrap();
-                self.next_token()?;
-                
+                // Numeric literal
+                let value = self.current_value;
+                self.next_token()?; // Skip number
+
                 self.emit(Opcode::IMM as i64);
                 self.emit(value);
             },
-            TokenType::Str => {
-                // String literal
-                let string_content = self.current_token.name.clone().unwrap();
-                self.next_token()?;
-                
-                // Add string to data segment
-                let string_addr = self.data_segment.len() as i64;
-                
-                // Copy string to data segment
-                for &byte in string_content.as_bytes() {
-                    self.data_segment.push(byte);
-                }
-                
-                // Add null terminator
-                self.data_segment.push(0);
-                
-                // Align to integer boundary
-                while self.data_segment.len() % std::mem::size_of::<i64>() != 0 {
-                    self.data_segment.push(0);
-                }
-                
-                // Load string address
-                self.emit(Opcode::IMM as i64);
-                self.emit(string_addr);
-            },
             TokenType::Id => {
                 // Identifier (variable or function)
-                let id_name = self.current_token.name.clone().unwrap();
-                self.next_token()?;
-                
+                let id_name = self.current_token.name.as_ref().unwrap().clone();
+                self.next_token()?; // Skip identifier
+
+                // Check for function call
                 if self.current_token.token_type == TokenType::LParen {
-                    // Function call
-                    self.next_token()?;
-                    
+                    self.next_token()?; // Skip '('
+
                     // Parse arguments
                     let mut arg_count = 0;
-                    
                     if self.current_token.token_type != TokenType::RParen {
-                        // Parse first argument
+                        // First argument
                         self.parse_expression()?;
                         self.emit(Opcode::PSH as i64);
                         arg_count += 1;
                         
-                        // Parse additional arguments
+                        // More arguments
                         while self.current_token.token_type == TokenType::Comma {
-                            self.next_token()?;
+                            self.next_token()?; // Skip ','
                             self.parse_expression()?;
                             self.emit(Opcode::PSH as i64);
                             arg_count += 1;
                         }
                     }
-                    
+
                     self.match_token(TokenType::RParen)?;
-                    
+
                     // Look up function
                     if let Some(symbol) = self.symbol_table.get(&id_name) {
                         match symbol.class {
@@ -1305,134 +479,404 @@ impl Parser {
                             },
                             TokenType::Fun => {
                                 // User-defined function
+                                let value = symbol.value;
                                 self.emit(Opcode::JSR as i64);
-                                self.emit(symbol.value);
+                                self.emit(value);
                             },
                             _ => {
-                                return Err(CompilerError::ParserError(
-                                    format!("{} is not a function", id_name)
-                                ));
+                                return Err(CompilerError::ParserError {
+                                    message: format!("{} is not a function at line {}", 
+                                        id_name, 
+                                        self.lexer.line()),
+                                    location: None,
+                                    source_line: None,
+                                    suggestion: None,
+                                });
                             }
                         }
                     } else {
-                        return Err(CompilerError::ParserError(
-                            format!("Undefined function: {}", id_name)
-                        ));
+                        return Err(CompilerError::ParserError {
+                            message: format!("Undefined function: {} at line {}", 
+                                id_name, 
+                                self.lexer.line()),
+                            location: None,
+                            source_line: None,
+                            suggestion: None,
+                        });
                     }
-                    
+
                     // Clean up arguments
-                    if arg_count > 0 {
-                        self.emit(Opcode::ADJ as i64);
-                        self.emit(arg_count);
-                    }
+                    self.emit(Opcode::ADJ as i64);
+                    self.emit(arg_count as i64);
                 } else {
-                    // Variable access
+                    // Variable
                     if let Some(symbol) = self.symbol_table.get(&id_name) {
                         match symbol.class {
-                            TokenType::Glo => {
-                                self.emit(Opcode::IMM as i64);
-                                self.emit(symbol.value);
-                            },
-                            TokenType::Loc => {
+                            TokenType::Id => {
+                                // Local variable
+                                let value = symbol.value;
                                 self.emit(Opcode::LEA as i64);
-                                self.emit(symbol.value);
+                                self.emit(value);
+                                self.emit(Opcode::LI as i64);
                             },
-                            TokenType::Num => {
-                                // Constant value (like enum)
+                            TokenType::Glo => {
+                                // Global variable
+                                let value = symbol.value;
                                 self.emit(Opcode::IMM as i64);
-                                self.emit(symbol.value);
-                                return Ok(());
+                                self.emit(value);
+                                self.emit(Opcode::LI as i64);
                             },
                             _ => {
-                                return Err(CompilerError::ParserError(
-                                    format!("Invalid variable: {}", id_name)
-                                ));
+                                return Err(CompilerError::ParserError {
+                                    message: format!("Invalid variable: {} at line {}", 
+                                        id_name, 
+                                        self.lexer.line()),
+                                    location: None,
+                                    source_line: None,
+                                    suggestion: None,
+                                });
                             }
                         }
-                        
-                        // Load value
-                        if symbol.typ == Type::CHAR {
-                            self.emit(Opcode::LC as i64);
-                        } else {
-                            self.emit(Opcode::LI as i64);
-                        }
                     } else {
-                        return Err(CompilerError::ParserError(
-                            format!("Undefined variable: {}", id_name)
-                        ));
+                        return Err(CompilerError::ParserError {
+                            message: format!("Undefined variable: {} at line {}", 
+                                id_name, 
+                                self.lexer.line()),
+                            location: None,
+                            source_line: None,
+                            suggestion: None,
+                        });
                     }
                 }
             },
-            TokenType::LParen => {
-                // Parenthesized expression
-                self.next_token()?;
-                self.parse_expression()?;
-                self.match_token(TokenType::RParen)?;
+            TokenType::Sub => {
+                // Negation
+                self.next_token()?; // Skip '-'
+                self.parse_unary_expression()?;
+                self.emit(Opcode::NEG as i64);
+            },
+            TokenType::Inc => {
+                // Pre-increment
+                self.next_token()?; // Skip '++'
+                self.parse_unary_expression()?;
+                self.emit(Opcode::PSH as i64);
+                self.emit(Opcode::IMM as i64);
+                self.emit(1);
+                self.emit(Opcode::ADD as i64);
+                self.emit(Opcode::SI as i64);
+            },
+            TokenType::Dec => {
+                // Pre-decrement
+                self.next_token()?; // Skip '--'
+                self.parse_unary_expression()?;
+                self.emit(Opcode::PSH as i64);
+                self.emit(Opcode::IMM as i64);
+                self.emit(1);
+                self.emit(Opcode::SUB as i64);
+                self.emit(Opcode::SI as i64);
+            },
+            TokenType::Mul => {
+                // Dereference
+                self.next_token()?; // Skip '*'
+                self.parse_unary_expression()?;
+                self.emit(Opcode::LI as i64);
+            },
+            TokenType::And => {
+                // Address of
+                self.next_token()?; // Skip '&'
+                self.parse_unary_expression()?;
+            },
+            TokenType::Tilde => {
+                // Bitwise NOT
+                self.next_token()?; // Skip '~'
+                self.parse_unary_expression()?;
+                self.emit(Opcode::XOR as i64);
+                self.emit(Opcode::IMM as i64);
+                self.emit(-1);
             },
             TokenType::Sizeof => {
-                // sizeof operator
-                self.next_token()?;
+                // Sizeof operator
+                self.next_token()?; // Skip 'sizeof'
+                self.match_token(TokenType::LParen)?;
                 
-                if self.current_token.token_type == TokenType::LParen {
-                    self.next_token()?;
-                    
-                    // Parse type
-                    let size_type = if self.current_token.token_type == TokenType::Int {
-                        self.next_token()?;
-                        Type::INT
-                    } else if self.current_token.token_type == TokenType::Char {
-                        self.next_token()?;
-                        Type::CHAR
-                    } else {
-                        return Err(CompilerError::ParserError(
-                            format!("Expected type in sizeof, got {:?}", self.current_token.token_type)
-                        ));
-                    };
-                    
-                    // Parse pointers
-                    let mut size_type = size_type;
-                    while self.current_token.token_type == TokenType::Mul {
-                        size_type = size_type.to_ptr();
-                        self.next_token()?;
-                    }
-                    
-                    self.match_token(TokenType::RParen)?;
-                    
-                    // Generate code to load size
-                    self.emit(Opcode::IMM as i64);
-                    self.emit(size_type.size() as i64);
+                let type_size = if self.current_token.token_type == TokenType::Int {
+                    self.next_token()?; // Skip 'int'
+                    Type::INT.size() as i64
+                } else if self.current_token.token_type == TokenType::Char {
+                    self.next_token()?; // Skip 'char'
+                    Type::CHAR.size() as i64
                 } else {
-                    return Err(CompilerError::ParserError(
-                        format!("Expected ( after sizeof, got {:?}", self.current_token.token_type)
-                    ));
-                }
+                    return Err(CompilerError::ParserError {
+                        message: format!("Expected type in sizeof, got {:?} at line {}", 
+                            self.current_token.token_type, 
+                            self.lexer.line()),
+                        location: None,
+                        source_line: None,
+                        suggestion: None,
+                    });
+                };
+
+                self.match_token(TokenType::RParen)?;
+                self.emit(Opcode::IMM as i64);
+                self.emit(type_size);
             },
             _ => {
-                return Err(CompilerError::ParserError(
-                    format!("Unexpected token in primary expression: {:?}", self.current_token.token_type)
-                ));
+                return Err(CompilerError::ParserError {
+                    message: format!("Unexpected token in expression: {:?} at line {}", 
+                        self.current_token.token_type, 
+                        self.lexer.line()),
+                    location: None,
+                    source_line: None,
+                    suggestion: None,
+                });
             }
         }
-        
-        // Check for array access
-        while self.current_token.token_type == TokenType::Brak {
+
+        Ok(())
+    }
+
+    /// Parse an expression
+    fn parse_expression(&mut self) -> Result<(), CompilerError> {
+        self.parse_unary_expression()?;
+
+        while self.current_token.token_type == TokenType::Add 
+            || self.current_token.token_type == TokenType::Sub
+            || self.current_token.token_type == TokenType::Mul
+            || self.current_token.token_type == TokenType::Div
+            || self.current_token.token_type == TokenType::Mod
+            || self.current_token.token_type == TokenType::Lt
+            || self.current_token.token_type == TokenType::Gt
+            || self.current_token.token_type == TokenType::Le
+            || self.current_token.token_type == TokenType::Ge
+            || self.current_token.token_type == TokenType::Eq
+            || self.current_token.token_type == TokenType::Ne
+            || self.current_token.token_type == TokenType::And
+            || self.current_token.token_type == TokenType::Or {
+            
+            let op = self.current_token.token_type.clone();
             self.next_token()?;
-            
-            // Push array address
-            self.emit(Opcode::PSH as i64);
-            
-            // Parse index expression
-            self.parse_expression()?;
-            
-            self.match_token(TokenType::RBracket)?;
-            
-            // Calculate element address
-            self.emit(Opcode::ADD as i64);
-            
-            // Load value from address
-            self.emit(Opcode::LI as i64);
+
+            self.parse_unary_expression()?;
+
+            match op {
+                TokenType::Add => { self.emit(Opcode::ADD as i64); },
+                TokenType::Sub => { self.emit(Opcode::SUB as i64); },
+                TokenType::Mul => { self.emit(Opcode::MUL as i64); },
+                TokenType::Div => { self.emit(Opcode::DIV as i64); },
+                TokenType::Mod => { self.emit(Opcode::MOD as i64); },
+                TokenType::Lt => { self.emit(Opcode::LT as i64); },
+                TokenType::Gt => { self.emit(Opcode::GT as i64); },
+                TokenType::Le => { self.emit(Opcode::LE as i64); },
+                TokenType::Ge => { self.emit(Opcode::GE as i64); },
+                TokenType::Eq => { self.emit(Opcode::EQ as i64); },
+                TokenType::Ne => { self.emit(Opcode::NE as i64); },
+                TokenType::And => { self.emit(Opcode::AND as i64); },
+                TokenType::Or => { self.emit(Opcode::OR as i64); },
+                _ => unreachable!(),
+            }
         }
-        
+
+        Ok(())
+    }
+
+    /// Get the generated bytecode
+    pub fn get_code(&self) -> &[i64] {
+        &self.code
+    }
+
+    /// Get the data segment
+    pub fn get_data(&self) -> &[u8] {
+        &self.data
+    }
+
+    /// Get the address of the main function
+    pub fn get_main_function(&self) -> Option<usize> {
+        self.symbol_table.get_main().map(|symbol| symbol.value as usize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parser_basic() -> Result<(), CompilerError> {
+        // Basic program to parse
+        let source = "int main() { return 42; }";
+        let mut parser = Parser::new(source.to_string(), false);
+
+        parser.init()?;
+        parser.parse()?;
+
+        // Check that main function is defined
+        assert!(parser.get_main_function().is_some());
+
+        // Check generated code
+        let code = parser.get_code();
+
+        // Should have JSR instructions for function calls
+        let has_jsr = code.contains(&(Opcode::JSR as i64));
+        assert!(has_jsr, "Expected JSR instruction for function call");
+
+        // Should have ADJ instruction to clean up arguments
+        let has_adj = code.contains(&(Opcode::ADJ as i64));
+        assert!(has_adj, "Expected ADJ instruction for argument cleanup");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parser_enum() -> Result<(), CompilerError> {
+        // Test enum declarations
+        let source = "
+        enum Color { RED, GREEN, BLUE = 5, YELLOW };
+
+        int main() {
+        return BLUE;
+        }
+        ";
+        let mut parser = Parser::new(source.to_string(), false);
+
+        parser.init()?;
+        parser.parse()?;
+
+        // Should compile and return 5 (BLUE's value)
+        let code = parser.get_code();
+        let main_code_offset = parser.get_main_function().unwrap();
+
+        // Check for IMM 5 instruction in main
+        let mut found_5 = false;
+        for i in main_code_offset..code.len() - 1 {
+            if code[i] == Opcode::IMM as i64 && code[i + 1] == 5 {
+                found_5 = true;
+                break;
+            }
+        }
+
+        assert!(found_5, "Expected code to load enum value 5");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parser_pointers() -> Result<(), CompilerError> {
+        // Test pointer operations
+        let source = "
+        int main() {
+        int x;
+        int *p;
+
+        x = 42;
+        p = &x;
+        *p = 24;
+
+        return x;
+        }
+        ";
+        let mut parser = Parser::new(source.to_string(), false);
+
+        parser.init()?;
+        parser.parse()?;
+
+        // Should have correct pointer operations
+        let code = parser.get_code();
+
+        // Should have LI and SI for pointer dereference
+        let has_li = code.contains(&(Opcode::LI as i64));
+        let has_si = code.contains(&(Opcode::SI as i64));
+
+        assert!(has_li, "Expected LI instruction for pointer operations");
+        assert!(has_si, "Expected SI instruction for pointer operations");
+
+        // Should eventually return 24 (the new value of x)
+        // This is hard to test without running the VM,
+        // but we can check for IMM 24 instruction
+        let mut found_24 = false;
+        for i in 0..code.len() - 1 {
+            if code[i] == Opcode::IMM as i64 && code[i + 1] == 24 {
+                found_24 = true;
+                break;
+            }
+        }
+
+        assert!(found_24, "Expected code to use value 24");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parser_arrays() -> Result<(), CompilerError> {
+        // Test array operations
+        let source = "
+        int main() {
+        int arr[3];
+
+        arr[0] = 1;
+        arr[1] = 2;
+        arr[2] = 3;
+
+        return arr[1];
+        }
+        ";
+        let mut parser = Parser::new(source.to_string(), false);
+
+        parser.init()?;
+        parser.parse()?;
+
+        // Check for array access instructions
+        let code = parser.get_code();
+
+        // Should use Brak (array subscript) and ADD
+        let has_add = code.contains(&(Opcode::ADD as i64));
+        assert!(has_add, "Expected ADD instruction for array access");
+
+        // Should return 2 (arr[1])
+        // Check for IMM 2 and IMM 1 (array index)
+        let mut found_1 = false;
+        let mut found_2 = false;
+        for i in 0..code.len() - 1 {
+            if code[i] == Opcode::IMM as i64 && code[i + 1] == 1 {
+                found_1 = true;
+            }
+            if code[i] == Opcode::IMM as i64 && code[i + 1] == 2 {
+                found_2 = true;
+            }
+        }
+
+        assert!(found_1, "Expected code to use index 1");
+        assert!(found_2, "Expected code to use value 2");
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parser_function_call() -> Result<(), CompilerError> {
+        // Test function calls
+        let source = "
+        int add(int a, int b) {
+            return a + b;
+        }
+
+        int main() {
+            return add(2, 3);
+        }
+        ";
+        let mut parser = Parser::new(source.to_string(), false);
+
+        parser.init()?;
+        parser.parse()?;
+
+        // Check generated code
+        let code = parser.get_code();
+
+        // Should have JSR instructions for function calls
+        let has_jsr = code.contains(&(Opcode::JSR as i64));
+        assert!(has_jsr, "Expected JSR instruction for function call");
+
+        // Should have ADJ instruction to clean up arguments
+        let has_adj = code.contains(&(Opcode::ADJ as i64));
+        assert!(has_adj, "Expected ADJ instruction for argument cleanup");
+
         Ok(())
     }
 }

@@ -12,16 +12,61 @@ pub struct Symbol {
     pub typ: Type,
     /// Value or address
     pub value: i64,
+    
+    // Fields for saving local symbol state when entering a new scope
+    pub h_class: Option<TokenType>,
+    pub h_type: Option<Type>,
+    pub h_value: Option<i64>,
+}
+
+impl Symbol {
+    /// Create a new symbol
+    pub fn new(name: &str, class: TokenType, typ: Type, value: i64) -> Self {
+        Symbol {
+            name: name.to_string(),
+            class,
+            typ,
+            value,
+            h_class: None,
+            h_type: None,
+            h_value: None,
+        }
+    }
+    
+    /// Save the current state of the symbol
+    pub fn save_state(&mut self) {
+        self.h_class = Some(self.class);
+        self.h_type = Some(self.typ);
+        self.h_value = Some(self.value);
+    }
+    
+    /// Restore the saved state
+    pub fn restore_state(&mut self) {
+        if let Some(class) = self.h_class {
+            self.class = class;
+        }
+        if let Some(typ) = self.h_type {
+            self.typ = typ;
+        }
+        if let Some(value) = self.h_value {
+            self.value = value;
+        }
+        
+        // Clear saved state
+        self.h_class = None;
+        self.h_type = None;
+        self.h_value = None;
+    }
 }
 
 /// Symbol table for managing variables and functions
 pub struct SymbolTable {
     /// List of all symbols
     symbols: Vec<Symbol>,
-    /// Stack of scope start indices
-    scopes: Vec<usize>,
-    /// Fast lookup by name (scope-prefixed)
+    /// Map of symbol names to indices (for fast lookup)
     name_map: HashMap<String, usize>,
+    /// Current scope level (0 = global)
+    scope_level: usize,
 }
 
 impl SymbolTable {
@@ -29,12 +74,12 @@ impl SymbolTable {
     pub fn new() -> Self {
         SymbolTable {
             symbols: Vec::new(),
-            scopes: vec![0], // Start at global scope
             name_map: HashMap::new(),
+            scope_level: 0, // Start at global scope
         }
     }
     
-    /// Add a symbol to the current scope
+    /// Add a symbol to the symbol table
     ///
     /// # Arguments
     ///
@@ -47,158 +92,50 @@ impl SymbolTable {
     ///
     /// The index of the added symbol
     pub fn add(&mut self, name: &str, class: TokenType, typ: Type, value: i64) -> usize {
+        // Create a new symbol
+        let symbol = Symbol::new(name, class, typ, value);
         let index = self.symbols.len();
         
-        // Create the new symbol
-        let symbol = Symbol {
-            name: name.to_string(),
-            class,
-            typ,
-            value,
-        };
+        // Add to the lookup map
+        self.name_map.insert(name.to_string(), index);
         
-        // Add to table
+        // Add to the table
         self.symbols.push(symbol);
-        
-        // Update the name map for current scope only
-        if !self.scopes.is_empty() {
-            let scope_prefix = if self.scopes.len() > 1 {
-                // Use scope level as prefix for local variables
-                format!("{}:{}", self.scopes.len() - 1, name)
-            } else {
-                // Global scope
-                name.to_string()
-            };
-            
-            self.name_map.insert(scope_prefix, index);
-        }
         
         index
     }
     
-    /// Find a symbol by name, searching from current scope up to global
+    /// Get a symbol by name
     ///
     /// # Arguments
     ///
-    /// * `name` - Symbol name to search for
+    /// * `name` - Symbol name
     ///
     /// # Returns
     ///
-    /// The symbol if found, None otherwise
-    pub fn get(&self, name: &str) -> Option<Symbol> {
-        // Start at current scope and work up
-        for scope_level in (0..self.scopes.len()).rev() {
-            let scope_prefix = if scope_level > 0 {
-                // Local scope
-                format!("{}:{}", scope_level, name)
-            } else {
-                // Global scope
-                name.to_string()
-            };
-            
-            if let Some(&index) = self.name_map.get(&scope_prefix) {
-                return Some(self.symbols[index].clone());
-            }
-        }
-        
-        // Check for global without explicit scope prefix
+    /// The symbol if found, or None
+    pub fn get(&self, name: &str) -> Option<&Symbol> {
+        self.name_map.get(name).map(|&index| &self.symbols[index])
+    }
+    
+    /// Get a mutable reference to a symbol
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Symbol name
+    ///
+    /// # Returns
+    ///
+    /// Mutable reference to the symbol if found, or None
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut Symbol> {
         if let Some(&index) = self.name_map.get(name) {
-            return Some(self.symbols[index].clone());
-        }
-        
-        None
-    }
-    
-    /// Check if a symbol exists in any accessible scope
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Symbol name to check
-    ///
-    /// # Returns
-    ///
-    /// True if the symbol exists in any accessible scope
-    pub fn exists(&self, name: &str) -> bool {
-        self.get(name).is_some()
-    }
-    
-    /// Check if a symbol exists in the current scope
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Symbol name to check
-    ///
-    /// # Returns
-    ///
-    /// True if the symbol exists in the current scope
-    pub fn exists_in_current_scope(&self, name: &str) -> bool {
-        if self.scopes.is_empty() {
-            return false;
-        }
-        
-        let scope_level = self.scopes.len() - 1;
-        let scope_prefix = if scope_level > 0 {
-            format!("{}:{}", scope_level, name)
+            Some(&mut self.symbols[index])
         } else {
-            name.to_string()
-        };
-        
-        self.name_map.contains_key(&scope_prefix)
-    }
-    
-    /// Enter a new scope
-    pub fn enter_scope(&mut self) {
-        // Save the current symbol count at this scope boundary
-        self.scopes.push(self.symbols.len());
-    }
-    
-    /// Exit the current scope
-    pub fn exit_scope(&mut self) {
-        if self.scopes.len() <= 1 {
-            // Don't exit global scope
-            return;
+            None
         }
-        
-        // Get the start index of the current scope
-        let start_index = self.scopes.pop().unwrap();
-        
-        // Remove scope entries from name map
-        let scope_level = self.scopes.len();
-        
-        // First collect keys to remove (can't modify while iterating)
-        let keys_to_remove: Vec<String> = self.name_map.keys()
-            .filter(|k| k.starts_with(&format!("{}:", scope_level)))
-            .cloned()
-            .collect();
-        
-        // Then remove them
-        for key in keys_to_remove {
-            self.name_map.remove(&key);
-        }
-        
-        // Keep only symbols from outer scopes
-        self.symbols.truncate(start_index);
     }
     
-    /// Find the main function
-    ///
-    /// # Returns
-    ///
-    /// The main function symbol if found, None otherwise
-    pub fn get_main(&self) -> Option<Symbol> {
-        self.get("main")
-    }
-    
-    /// Get all symbols
-    ///
-    /// # Returns
-    ///
-    /// A slice of all symbols
-    pub fn get_symbols(&self) -> &[Symbol] {
-        &self.symbols
-    }
-    
-    /// Get symbol by index
+    /// Get a symbol by index
     ///
     /// # Arguments
     ///
@@ -206,27 +143,87 @@ impl SymbolTable {
     ///
     /// # Returns
     ///
-    /// The symbol at the given index, or None if out of bounds
+    /// The symbol at the given index, or None
     pub fn get_by_index(&self, index: usize) -> Option<&Symbol> {
         self.symbols.get(index)
     }
     
-    /// Get the number of scopes
+    /// Get a mutable reference to a symbol by index
+    ///
+    /// # Arguments
+    ///
+    /// * `index` - Symbol index
     ///
     /// # Returns
     ///
-    /// The number of scopes
-    pub fn get_scope_count(&self) -> usize {
-        self.scopes.len()
+    /// Mutable reference to the symbol at the given index, or None
+    pub fn get_by_index_mut(&mut self, index: usize) -> Option<&mut Symbol> {
+        self.symbols.get_mut(index)
     }
     
-    /// Get current scope level
+    /// Check if a symbol exists
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - Symbol name
     ///
     /// # Returns
     ///
-    /// The current scope level (0 for global)
+    /// True if the symbol exists, false otherwise
+    pub fn exists(&self, name: &str) -> bool {
+        self.name_map.contains_key(name)
+    }
+    
+    /// Enter a new scope level
+    pub fn enter_scope(&mut self) {
+        self.scope_level += 1;
+    }
+    
+    /// Exit the current scope level
+    pub fn exit_scope(&mut self) {
+        if self.scope_level > 0 {
+            self.scope_level -= 1;
+        }
+    }
+    
+    /// Get the current scope level
     pub fn current_scope_level(&self) -> usize {
-        self.scopes.len() - 1
+        self.scope_level
+    }
+    
+    /// Get the number of symbols in the table
+    pub fn len(&self) -> usize {
+        self.symbols.len()
+    }
+    
+    /// Check if the symbol table is empty
+    pub fn is_empty(&self) -> bool {
+        self.symbols.is_empty()
+    }
+    
+    /// Get an iterator over all symbols
+    pub fn iter(&self) -> impl Iterator<Item = &Symbol> {
+        self.symbols.iter()
+    }
+    
+    /// Iterate over all symbols with mutable access
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Symbol> {
+        self.symbols.iter_mut()
+    }
+    
+    /// Get the main function 
+    pub fn get_main(&self) -> Option<&Symbol> {
+        self.get("main")
+    }
+    
+    /// Get the current symbol being processed (last added)
+    pub fn current_symbol(&self) -> Option<&Symbol> {
+        self.symbols.last()
+    }
+    
+    /// Get a mutable reference to the current symbol
+    pub fn current_symbol_mut(&mut self) -> Option<&mut Symbol> {
+        self.symbols.last_mut()
     }
 }
 
@@ -235,90 +232,128 @@ mod tests {
     use super::*;
     
     #[test]
+    fn test_symbol_creation() {
+        let symbol = Symbol::new("test", TokenType::Glo, Type::INT, 42);
+        
+        assert_eq!(symbol.name, "test");
+        assert_eq!(symbol.class, TokenType::Glo);
+        assert_eq!(symbol.typ, Type::INT);
+        assert_eq!(symbol.value, 42);
+        assert_eq!(symbol.h_class, None);
+        assert_eq!(symbol.h_type, None);
+        assert_eq!(symbol.h_value, None);
+    }
+    
+    #[test]
+    fn test_symbol_state() {
+        let mut symbol = Symbol::new("test", TokenType::Glo, Type::INT, 42);
+        
+        // Save state
+        symbol.save_state();
+        
+        // Change values
+        symbol.class = TokenType::Loc;
+        symbol.typ = Type::CHAR;
+        symbol.value = 100;
+        
+        // Check that saved state is stored
+        assert_eq!(symbol.h_class, Some(TokenType::Glo));
+        assert_eq!(symbol.h_type, Some(Type::INT));
+        assert_eq!(symbol.h_value, Some(42));
+        
+        // Restore state
+        symbol.restore_state();
+        
+        // Check restored values
+        assert_eq!(symbol.class, TokenType::Glo);
+        assert_eq!(symbol.typ, Type::INT);
+        assert_eq!(symbol.value, 42);
+        
+        // Check that saved state is cleared
+        assert_eq!(symbol.h_class, None);
+        assert_eq!(symbol.h_type, None);
+        assert_eq!(symbol.h_value, None);
+    }
+    
+    #[test]
     fn test_symbol_table() {
         let mut table = SymbolTable::new();
         
-        // Add global symbols
-        table.add("x", TokenType::Glo, Type::INT, 0);
-        table.add("y", TokenType::Glo, Type::CHAR, 4);
+        // Add symbols
+        let idx1 = table.add("var1", TokenType::Glo, Type::INT, 10);
+        let idx2 = table.add("var2", TokenType::Glo, Type::CHAR, 20);
         
-        // Enter a function scope
+        // Check indices
+        assert_eq!(idx1, 0);
+        assert_eq!(idx2, 1);
+        
+        // Check get by name
+        let sym1 = table.get("var1").unwrap();
+        assert_eq!(sym1.name, "var1");
+        assert_eq!(sym1.value, 10);
+        
+        // Check get by index
+        let sym2 = table.get_by_index(1).unwrap();
+        assert_eq!(sym2.name, "var2");
+        assert_eq!(sym2.value, 20);
+        
+        // Check exists
+        assert!(table.exists("var1"));
+        assert!(table.exists("var2"));
+        assert!(!table.exists("var3"));
+        
+        // Check length
+        assert_eq!(table.len(), 2);
+        assert!(!table.is_empty());
+        
+        // Test scope levels
+        assert_eq!(table.current_scope_level(), 0);
         table.enter_scope();
-        
-        // Add local symbols
-        table.add("a", TokenType::Loc, Type::INT, 0);
-        table.add("b", TokenType::Loc, Type::INT, 1);
-        
-        // Enter a block scope
+        assert_eq!(table.current_scope_level(), 1);
         table.enter_scope();
-        
-        // Add more locals
-        table.add("c", TokenType::Loc, Type::INT, 2);
-        
-        // Shadow a global
-        table.add("x", TokenType::Loc, Type::INT, 3);
-        
-        // Check symbol lookup
-        let sym_c = table.get("c").unwrap();
-        assert_eq!(sym_c.name, "c");
-        assert_eq!(sym_c.class, TokenType::Loc);
-        
-        // The local x should shadow the global
-        let sym_x = table.get("x").unwrap();
-        assert_eq!(sym_x.class, TokenType::Loc);
-        
-        // Exit the block scope
+        assert_eq!(table.current_scope_level(), 2);
         table.exit_scope();
-        
-        // c should no longer be accessible
-        assert!(table.get("c").is_none());
-        
-        // x should now be the global
-        let sym_x = table.get("x").unwrap();
-        assert_eq!(sym_x.class, TokenType::Glo);
-        
-        // Exit the function scope
+        assert_eq!(table.current_scope_level(), 1);
         table.exit_scope();
-        
-        // a and b should no longer be accessible
-        assert!(table.get("a").is_none());
-        assert!(table.get("b").is_none());
+        assert_eq!(table.current_scope_level(), 0);
     }
     
     #[test]
-    fn test_exist_in_current_scope() {
+    fn test_symbol_modification() {
         let mut table = SymbolTable::new();
         
-        // Add global symbols
-        table.add("x", TokenType::Glo, Type::INT, 0);
+        // Add a symbol
+        table.add("var", TokenType::Glo, Type::INT, 10);
         
-        assert!(table.exists_in_current_scope("x"));
-        assert!(!table.exists_in_current_scope("y"));
+        // Modify the symbol
+        {
+            let sym = table.get_mut("var").unwrap();
+            sym.value = 20;
+        }
         
-        // Enter a function scope
-        table.enter_scope();
-        
-        assert!(!table.exists_in_current_scope("x")); // Not in current scope
-        assert!(table.exists("x")); // But still accessible
-        
-        // Add local symbols
-        table.add("a", TokenType::Loc, Type::INT, 0);
-        
-        assert!(table.exists_in_current_scope("a"));
+        // Check the modification
+        let sym = table.get("var").unwrap();
+        assert_eq!(sym.value, 20);
     }
     
     #[test]
-    fn test_function_symbol() {
+    fn test_main_function() {
         let mut table = SymbolTable::new();
         
-        // Add a function
-        let func_addr = 100;
-        table.add("main", TokenType::Fun, Type::INT, func_addr);
+        // Add some symbols
+        table.add("var", TokenType::Glo, Type::INT, 10);
+        table.add("func", TokenType::Fun, Type::INT, 100);
         
-        // Find main
+        // No main function yet
+        assert!(table.get_main().is_none());
+        
+        // Add main function
+        table.add("main", TokenType::Fun, Type::INT, 200);
+        
+        // Now we have a main function
         let main = table.get_main().unwrap();
         assert_eq!(main.name, "main");
         assert_eq!(main.class, TokenType::Fun);
-        assert_eq!(main.value, func_addr);
+        assert_eq!(main.value, 200);
     }
 }

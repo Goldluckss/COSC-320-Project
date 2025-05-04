@@ -2,21 +2,21 @@
 name = "c4_rust"
 version = "0.1.0"
 edition = "2021"
-authors = ["Your Team"]
-description = "Rust implementation of the C4 compiler"
-readme = "README.md"
+authors = ["Your Name <your.email@example.com>"]
+description = "A Rust implementation of the C4 compiler"
 license = "MIT"
-
-[lib]
-name = "c4_rust"
-path = "src/lib.rs"
+repository = "https://github.com/yourusername/c4_rust"
+readme = "README.md"
 
 [dependencies]
-# No external dependencies required
+# No external dependencies for the core compiler
 
 [dev-dependencies]
-pretty_assertions = "1.3"
+pretty_assertions = "1.4.0"  # For more readable test failures
 
 [profile.release]
 opt-level = 3
+debug = false
+strip = true
 lto = true
+codegen-units = 1

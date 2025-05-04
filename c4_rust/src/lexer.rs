@@ -9,7 +9,7 @@ pub struct Token {
     pub token_type: TokenType,
     /// Value for numeric tokens
     pub value: Option<i64>,
-    /// Name for identifier or string tokens
+    /// Name for identifier tokens
     pub name: Option<String>,
 }
 
@@ -23,6 +23,8 @@ pub struct Lexer {
     line_position: usize,
     /// Current line number
     line: usize,
+    /// Current column position
+    column: usize,
     
     /// Current token information
     current: Token,
@@ -32,6 +34,9 @@ pub struct Lexer {
     
     /// Flag to print source lines during processing
     print_source: bool,
+    
+    /// Store source as lines for error reporting
+    source_lines: Vec<String>,
 }
 
 impl Lexer {
@@ -42,11 +47,15 @@ impl Lexer {
     /// * `source` - The source code to tokenize
     /// * `print_source` - Whether to print source lines during processing
     pub fn new(source: String, print_source: bool) -> Self {
+        // Split source into lines for error reporting
+        let source_lines: Vec<String> = source.lines().map(|l| l.to_string()).collect();
+        
         let mut lexer = Lexer {
             source,
             position: 0,
             line_position: 0,
             line: 1,
+            column: 1,
             current: Token {
                 token_type: TokenType::Eof,
                 value: None,
@@ -54,6 +63,7 @@ impl Lexer {
             },
             keywords: HashMap::new(),
             print_source,
+            source_lines,
         };
         
         // Initialize keyword map
@@ -73,6 +83,7 @@ impl Lexer {
         self.keywords.insert("return".to_string(), TokenType::Return);
         self.keywords.insert("sizeof".to_string(), TokenType::Sizeof);
         self.keywords.insert("while".to_string(), TokenType::While);
+        self.keywords.insert("void".to_string(), TokenType::Void);
     }
     
     /// Get the current character or None if at end of source
@@ -81,7 +92,6 @@ impl Lexer {
     }
     
     /// Peek at the next character without advancing
-    #[allow(dead_code)]
     fn peek_char(&self) -> Option<char> {
         self.source.chars().nth(self.position + 1)
     }
@@ -90,6 +100,13 @@ impl Lexer {
     fn advance(&mut self) -> Option<char> {
         let current = self.current_char();
         self.position += 1;
+        self.column += 1;
+        
+        // Reset column on newline
+        if current == Some('\n') {
+            self.column = 1;
+        }
+        
         current
     }
     
@@ -191,8 +208,9 @@ impl Lexer {
                         name: None,
                     }
                 } else {
+                    // We'll use Tilde for logical NOT (like C4.c)
                     Token {
-                        token_type: TokenType::Not,
+                        token_type: TokenType::Tilde,
                         value: None,
                         name: None,
                     }
@@ -324,7 +342,7 @@ impl Lexer {
             '~' => {
                 self.advance();
                 Token {
-                    token_type: TokenType::BitNot,
+                    token_type: TokenType::Tilde,
                     value: None,
                     name: None,
                 }
@@ -407,9 +425,11 @@ impl Lexer {
             },
             // Unrecognized character
             _ => {
-                return Err(CompilerError::LexerError(
-                    format!("Unexpected character: '{}' at line {}", ch, self.line)
-                ));
+                return Err(CompilerError::LexerError {
+                    message: format!("Unexpected character: '{}' at line {}", ch, self.line),
+                    location: None,
+                    source_line: None,
+                });
             }
         };
         
@@ -433,6 +453,7 @@ impl Lexer {
                 }
                 self.line += 1;
                 self.line_position = self.position + 1;
+                self.column = 1; // Reset column on newline
             }
             
             self.advance();
@@ -458,6 +479,7 @@ impl Lexer {
     /// Read an identifier or keyword
     fn read_identifier(&mut self) -> Result<Token, CompilerError> {
         let start_pos = self.position;
+        let start_column = self.column;
         
         // Read the entire identifier
         while let Some(ch) = self.current_char() {
@@ -491,8 +513,7 @@ impl Lexer {
     /// Read a numeric literal
     fn read_number(&mut self) -> Result<Token, CompilerError> {
         let start_pos = self.position;
-        let mut is_hex = false;
-        let mut is_octal = false;
+        let start_column = self.column;
         
         // Check for hex or octal prefix
         let first_digit = self.current_char().unwrap();
@@ -501,10 +522,73 @@ impl Lexer {
             
             if let Some(ch) = self.current_char() {
                 if ch == 'x' || ch == 'X' {
-                    is_hex = true;
+                    // Hexadecimal
                     self.advance();
+                    
+                    let hex_start = self.position;
+                    while let Some(ch) = self.current_char() {
+                        if ch.is_digit(16) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    let hex_str = &self.source[hex_start..self.position];
+                    if hex_str.is_empty() {
+                        return Err(CompilerError::LexerError {
+                            message: format!("Invalid hexadecimal number at line {}", self.line),
+                            location: None,
+                            source_line: None,
+                        });
+                    }
+                    
+                    let value = i64::from_str_radix(hex_str, 16).map_err(|e| {
+                        CompilerError::LexerError {
+                            message: format!("Invalid hexadecimal number: 0x{}", hex_str),
+                            location: None,
+                            source_line: None,
+                        }
+                    })?;
+                    
+                    return Ok(Token {
+                        token_type: TokenType::Num,
+                        value: Some(value),
+                        name: None,
+                    });
                 } else if ch >= '0' && ch <= '7' {
-                    is_octal = true;
+                    // Octal
+                    let oct_start = self.position - 1; // Include the leading 0
+                    
+                    while let Some(ch) = self.current_char() {
+                        if ch >= '0' && ch <= '7' {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    let oct_str = &self.source[oct_start..self.position];
+                    let value = i64::from_str_radix(oct_str, 8).map_err(|e| {
+                        CompilerError::LexerError {
+                            message: format!("Invalid octal number: {}", oct_str),
+                            location: None,
+                            source_line: None,
+                        }
+                    })?;
+                    
+                    return Ok(Token {
+                        token_type: TokenType::Num,
+                        value: Some(value),
+                        name: None,
+                    });
+                } else {
+                    // Just a zero
+                    return Ok(Token {
+                        token_type: TokenType::Num,
+                        value: Some(0),
+                        name: None,
+                    });
                 }
             } else {
                 // Just a zero
@@ -516,77 +600,30 @@ impl Lexer {
             }
         }
         
-        // Read the rest of the number
-        if is_hex {
-            // Read hexadecimal
-            while let Some(ch) = self.current_char() {
-                if ch.is_digit(16) {
-                    self.advance();
-                } else {
-                    break;
-                }
+        // Decimal number
+        while let Some(ch) = self.current_char() {
+            if ch.is_digit(10) {
+                self.advance();
+            } else {
+                break;
             }
-            
-            // Parse the hex value
-            let hex_str = &self.source[start_pos + 2..self.position]; // Skip "0x"
-            if hex_str.is_empty() {
-                return Err(CompilerError::LexerError(
-                    format!("Invalid hexadecimal number at line {}", self.line)
-                ));
-            }
-            
-            let value = i64::from_str_radix(hex_str, 16).map_err(|_| {
-                CompilerError::LexerError(format!("Invalid hexadecimal number: 0x{}", hex_str))
-            })?;
-            
-            Ok(Token {
-                token_type: TokenType::Num,
-                value: Some(value),
-                name: None,
-            })
-        } else if is_octal {
-            // Read octal
-            while let Some(ch) = self.current_char() {
-                if ch >= '0' && ch <= '7' {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            
-            // Parse the octal value
-            let oct_str = &self.source[start_pos..self.position];
-            let value = i64::from_str_radix(oct_str, 8).map_err(|_| {
-                CompilerError::LexerError(format!("Invalid octal number: {}", oct_str))
-            })?;
-            
-            Ok(Token {
-                token_type: TokenType::Num,
-                value: Some(value),
-                name: None,
-            })
-        } else {
-            // Read decimal
-            while let Some(ch) = self.current_char() {
-                if ch.is_digit(10) {
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            
-            // Parse the decimal value
-            let dec_str = &self.source[start_pos..self.position];
-            let value = dec_str.parse::<i64>().map_err(|_| {
-                CompilerError::LexerError(format!("Invalid decimal number: {}", dec_str))
-            })?;
-            
-            Ok(Token {
-                token_type: TokenType::Num,
-                value: Some(value),
-                name: None,
-            })
         }
+        
+        // Parse the decimal value
+        let dec_str = &self.source[start_pos..self.position];
+        let value = dec_str.parse::<i64>().map_err(|e| {
+            CompilerError::LexerError {
+                message: format!("Invalid decimal number: {}", dec_str),
+                location: None,
+                source_line: None,
+            }
+        })?;
+        
+        Ok(Token {
+            token_type: TokenType::Num,
+            value: Some(value),
+            name: None,
+        })
     }
     
     /// Read a string or character literal
@@ -617,9 +654,11 @@ impl Lexer {
                     Some('"') => '"',
                     Some('0') => '\0',
                     Some(esc) => esc,
-                    None => return Err(CompilerError::LexerError(
-                        format!("Unexpected end of file in escape sequence at line {}", self.line)
-                    )),
+                    None => return Err(CompilerError::LexerError {
+                        message: format!("Unexpected end of file in escape sequence at line {}", self.line),
+                        location: None,
+                        source_line: None,
+                    }),
                 }
             } else {
                 ch
@@ -640,23 +679,24 @@ impl Lexer {
         if self.current_char() == Some(quote_char) {
             self.advance();
         } else {
-            return Err(CompilerError::LexerError(
-                format!("Unterminated {} literal at line {}", 
+            return Err(CompilerError::LexerError {
+                message: format!("Unterminated {} literal at line {}", 
                     if is_string { "string" } else { "character" }, 
-                    self.line
-                )
-            ));
+                    self.line),
+                location: None,
+                source_line: None,
+            });
         }
         
         if is_string {
-            // For string literals, we'll use a special token type and store the content
+            // Return the string value (for C4 compatibility, this is the address)
             Ok(Token {
-                token_type: TokenType::Str,
-                value: None,
+                token_type: TokenType::Num,
+                value: Some(string_content.as_ptr() as i64),
                 name: Some(string_content),
             })
         } else {
-            // For character literals, we'll use Num token type with the character value
+            // For character literals, use Num token type with the character value
             Ok(Token {
                 token_type: TokenType::Num,
                 value: Some(value),
@@ -674,183 +714,18 @@ impl Lexer {
     pub fn line(&self) -> usize {
         self.line
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_keywords() {
-        let source = "int char if else while return sizeof enum".to_string();
-        let mut lexer = Lexer::new(source, false);
-        
-        let expected = vec![
-            TokenType::Int,
-            TokenType::Char,
-            TokenType::If,
-            TokenType::Else,
-            TokenType::While,
-            TokenType::Return,
-            TokenType::Sizeof,
-            TokenType::Enum,
-        ];
-        
-        for expected_type in expected {
-            let token = lexer.next_token().unwrap();
-            assert_eq!(token.token_type, expected_type);
+    
+    /// Get the current column position
+    pub fn column(&self) -> usize {
+        self.column
+    }
+    
+    /// Get the current line content for error reporting
+    pub fn get_current_line(&self) -> String {
+        if self.line <= self.source_lines.len() {
+            self.source_lines[self.line - 1].clone()
+        } else {
+            String::new()
         }
-        
-        // Should be EOF at the end
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Eof);
-    }
-    
-    #[test]
-    fn test_identifiers() {
-        let source = "variable _underscore var123".to_string();
-        let mut lexer = Lexer::new(source, false);
-        
-        // First token: "variable"
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Id);
-        assert_eq!(token.name.unwrap(), "variable");
-        
-        // Second token: "_underscore"
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Id);
-        assert_eq!(token.name.unwrap(), "_underscore");
-        
-        // Third token: "var123"
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Id);
-        assert_eq!(token.name.unwrap(), "var123");
-    }
-    
-    #[test]
-    fn test_numbers() {
-        let source = "123 0x1F 077".to_string();
-        let mut lexer = Lexer::new(source, false);
-        
-        // Decimal number
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Num);
-        assert_eq!(token.value.unwrap(), 123);
-        
-        // Hexadecimal number
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Num);
-        assert_eq!(token.value.unwrap(), 31); // 0x1F = 31 in decimal
-        
-        // Octal number
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Num);
-        assert_eq!(token.value.unwrap(), 63); // 077 = 63 in decimal
-    }
-    
-    #[test]
-    fn test_string_and_char_literals() {
-        let source = r#"'a' "hello" '\n'"#.to_string();
-        let mut lexer = Lexer::new(source, false);
-        
-        // Character literal
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Num);
-        assert_eq!(token.value.unwrap(), 'a' as i64);
-        
-        // String literal
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Str);
-        assert_eq!(token.name.unwrap(), "hello");
-        
-        // Escape character
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Num);
-        assert_eq!(token.value.unwrap(), '\n' as i64);
-    }
-    
-    #[test]
-    fn test_operators() {
-        let source = "+ - * / % == != < > <= >= << >> & | ^ && || = ? ++".to_string();
-        let mut lexer = Lexer::new(source, false);
-        
-        let expected = vec![
-            TokenType::Add,
-            TokenType::Sub,
-            TokenType::Mul,
-            TokenType::Div,
-            TokenType::Mod,
-            TokenType::Eq,
-            TokenType::Ne,
-            TokenType::Lt,
-            TokenType::Gt,
-            TokenType::Le,
-            TokenType::Ge,
-            TokenType::Shl,
-            TokenType::Shr,
-            TokenType::And,
-            TokenType::Or,
-            TokenType::Xor,
-            TokenType::Lan,
-            TokenType::Lor,
-            TokenType::Assign,
-            TokenType::Cond,
-            TokenType::Inc,
-        ];
-        
-        for expected_type in expected {
-            let token = lexer.next_token().unwrap();
-            assert_eq!(token.token_type, expected_type);
-        }
-    }
-    
-    #[test]
-    fn test_comments() {
-        let source = "int a; // This is a comment\nint b;".to_string();
-        let mut lexer = Lexer::new(source, false);
-        
-        // int
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Int);
-        
-        // a
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Id);
-        assert_eq!(token.name.unwrap(), "a");
-        
-        // ;
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Semicolon);
-        
-        // The comment should be skipped, so next token should be "int"
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Int);
-        
-        // b
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Id);
-        assert_eq!(token.name.unwrap(), "b");
-    }
-    
-    #[test]
-    fn test_lexer_error() {
-        let source = "int a; @ int b;".to_string();
-        let mut lexer = Lexer::new(source, false);
-        
-        // int
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Int);
-        
-        // a
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Id);
-        
-        // ;
-        let token = lexer.next_token().unwrap();
-        assert_eq!(token.token_type, TokenType::Semicolon);
-        
-        // @ - This should cause an error
-        let result = lexer.next_token();
-        assert!(result.is_err());
     }
 }

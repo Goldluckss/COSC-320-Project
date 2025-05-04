@@ -1,7 +1,7 @@
 /// C4 Compiler in Rust
 ///
 /// This is a Rust implementation of the C4 compiler, originally written by Robert Swierczek.
-/// The compiler translates a small subset of C into bytecode and includes a virtual machine
+/// The compiler translates a subset of C into bytecode and includes a virtual machine
 /// to execute the compiled code.
 ///
 /// The compiler supports:
